@@ -22,7 +22,9 @@ import {
   STARTUP_SCAN_BUDGET_MS,
 } from "./config.js";
 import {
+  type ClawAegisPluginConfig,
   type DefenseMode,
+  getUserConfigMtimeMs,
   resolveClawAegisPluginConfig,
   resolveClawAegisStateDir,
   resolveSkillScanRoots,
@@ -392,6 +394,70 @@ type DefenseEventRecord = {
   userInput?: string;
 };
 
+// secplane HTTP shipper. Reads ClawManager backend address + agent session
+// token from env vars that the openclaw-agent in the OpenClaw image already
+// injects (CLAWMANAGER_AGENT_BASE_URL, CLAWMANAGER_INSTANCE_TOKEN). When any
+// defense event lands on disk we POST the same record to ClawManager's
+// secplane ingest endpoint. Failures are swallowed silently — the JSONL on
+// disk remains the source of truth and ops can re-ingest later if needed.
+const SECPLANE_INGEST_PATH = "/api/v1/secplane/agent/sec_events/batch";
+
+function postEventToSecplane(record: DefenseEventRecord): void {
+  const baseURL = process.env.CLAWMANAGER_AGENT_BASE_URL;
+  const token =
+    process.env.CLAWMANAGER_INSTANCE_TOKEN || process.env.CLAWMANAGER_LLM_API_KEY;
+  if (!baseURL || !token) return;
+
+  // Map the ClawAegis-internal record into the wire shape secplane's ingest
+  // handler (internal/secplane/ingest/handler.go IngestEvent) expects.
+  const event = {
+    event_id: `aegis-${record.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    ts: new Date(record.timestamp).toISOString(),
+    hook: "claw-aegis",
+    defense: record.defense,
+    rule_id: record.defense,
+    rule_name: record.defense,
+    severity: record.result === "blocked" ? "high" : "medium",
+    result: record.result,
+    reason: record.reason ?? "",
+    subject:
+      record.toolName !== undefined
+        ? `tool.${record.toolName}`
+        : "claw-aegis.event",
+    evidence: record.commandText ?? record.userInput ?? "",
+    raw_payload: JSON.stringify({
+      details: record.details,
+      toolParams: record.toolParams,
+    }).slice(0, 2048),
+  };
+
+  const url = baseURL.replace(/\/$/, "") + SECPLANE_INGEST_PATH;
+  const body = JSON.stringify({ source: "aegis", events: [event] });
+
+  // Use globalThis.fetch (Node 22 in the OpenClaw image has native fetch).
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 3000);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const f = (globalThis as any).fetch as typeof fetch | undefined;
+  if (!f) {
+    clearTimeout(timer);
+    return;
+  }
+  f(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body,
+    signal: ac.signal,
+  })
+    .catch(() => {
+      /* fail-open: disk JSONL stays as source of truth */
+    })
+    .finally(() => clearTimeout(timer));
+}
+
 function createDefenseEventWriter(stateDir: string) {
   const eventsPath = path.join(stateDir, DEFENSE_EVENTS_FILENAME);
   let ensured = false;
@@ -405,6 +471,13 @@ function createDefenseEventWriter(stateDir: string) {
       await fs.appendFile(eventsPath, line, "utf8");
     };
     doWrite().catch(() => {});
+    // Fire-and-forget HTTP shipping. Never await — the hook caller must not
+    // be slowed down or fail if ClawManager is unreachable.
+    try {
+      postEventToSecplane(record);
+    } catch {
+      // ignore — fail-open
+    }
   };
 }
 
@@ -464,6 +537,35 @@ export function createClawAegisRuntime(
   const stateDir = resolveClawAegisStateDir(api);
   const emitDefenseEvent = createDefenseEventWriter(stateDir);
   const config = resolveClawAegisPluginConfig(api);
+  // Live-reloading view of the same config. Hot path handlers (e.g. the
+  // per-message user_risk_scan) call getLiveConfig() instead of reading
+  // `config` so that a freshly-dispatched user_config.json takes effect on
+  // the NEXT hook event, without requiring an openclaw gateway restart.
+  // Re-parse cost is gated behind a cheap fs.statSync that only triggers
+  // when the file's mtime moved.
+  let liveConfig: ClawAegisPluginConfig = config;
+  let liveConfigMtimeMs: number = getUserConfigMtimeMs(api.rootDir);
+  const getLiveConfig = (): ClawAegisPluginConfig => {
+    const mt = getUserConfigMtimeMs(api.rootDir);
+    if (mt !== 0 && mt !== liveConfigMtimeMs) {
+      try {
+        liveConfig = resolveClawAegisPluginConfig(api);
+        liveConfigMtimeMs = mt;
+        logger.info("claw-aegis: user_config.json 已热重载", {
+          event: "user_config_hot_reload",
+          mtimeMs: mt,
+          userRiskScanEnabled: liveConfig.userRiskScanEnabled,
+          disabledUserRiskFlags: liveConfig.disabledUserRiskFlags,
+        });
+      } catch (error) {
+        logger.warn("claw-aegis: user_config.json 热重载失败，沿用上次配置", {
+          event: "user_config_hot_reload_failed",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return liveConfig;
+  };
   const skillScanRoots = resolveSkillScanRoots(api);
   const state = new ClawAegisState({ stateDir, logger, now: options?.now });
   const emitSkillScanEvent = createSkillScanEventWriter(stateDir);
@@ -588,7 +690,8 @@ export function createClawAegisRuntime(
           mechanism: "user_risk_scan",
           sessionKey,
         });
-        if (!config.userRiskScanEnabled) {
+        const liveCfg = getLiveConfig();
+        if (!liveCfg.userRiskScanEnabled) {
           const durationMs = now() - startedAt;
           logDefenseResult(logger, {
             hook: "message_received",
@@ -606,48 +709,63 @@ export function createClawAegisRuntime(
           });
           return;
         }
-        if (!sessionKey) {
-          const durationMs = now() - startedAt;
-          logDefenseResult(logger, {
-            hook: "message_received",
-            mechanism: "user_risk_scan",
-            result: "skipped_missing_session",
-            durationMs,
-          });
-          logDefenseFinish(logger, {
-            hook: "message_received",
-            mechanism: "user_risk_scan",
-            result: "skipped_missing_session",
-            durationMs,
-          });
-          return;
-        }
-        const match = detectUserRiskFlags(event.content ?? "");
+        // OpenClaw doesn't always populate ctx.sessionKey at the
+        // message_received timing (it lands later, by before_message_write).
+        // Still scan and emit defense events so a malicious user input is
+        // never silently dropped — only state-tracking is skipped.
+        const effectiveSessionKey = sessionKey ?? "anonymous";
+        const match = detectUserRiskFlags(
+          event.content ?? "",
+          liveCfg.disabledUserRiskFlags,
+        );
         const durationMs = now() - startedAt;
         if (match.flags.length === 0) {
           logDefenseResult(logger, {
             hook: "message_received",
             mechanism: "user_risk_scan",
-            sessionKey,
+            sessionKey: effectiveSessionKey,
             result: "clear",
             durationMs,
           });
           logDefenseFinish(logger, {
             hook: "message_received",
             mechanism: "user_risk_scan",
-            sessionKey,
+            sessionKey: effectiveSessionKey,
             result: "clear",
             durationMs,
           });
           return;
         }
-        state.noteUserRisk(sessionKey, match.flags);
+        // Per-flag mode partition: flags in observeOnlyUserRiskFlags get
+        // recorded but do NOT propagate into state (so no dynamic prompt
+        // guard is injected downstream); other matched flags are full
+        // enforcement (note state + inject reminder).
+        const observeOnlySet = new Set(liveCfg.observeOnlyUserRiskFlags ?? []);
+        const enforceFlags: string[] = [];
+        const observeFlags: string[] = [];
+        for (const flag of match.flags) {
+          if (observeOnlySet.has(flag)) {
+            observeFlags.push(flag);
+          } else {
+            enforceFlags.push(flag);
+          }
+        }
+        if (sessionKey && enforceFlags.length > 0) {
+          state.noteUserRisk(sessionKey, enforceFlags);
+        }
+        // If we have any enforce-mode match, the alert is blocked; otherwise
+        // (purely observe-mode matches) keep the historical "observed" label.
+        const eventResult = enforceFlags.length > 0 ? "blocked" : "observed";
         emitDefenseEvent({
           timestamp: now(),
           defense: "user_risk_scan",
-          result: "observed",
+          result: eventResult,
           reason: `检测到风险标记: ${match.flags.join(", ")}`,
-          details: { flags: match.flags },
+          details: {
+            flags: match.flags,
+            enforceFlags,
+            observeFlags,
+          },
           userInput: (event.content ?? "").slice(0, 500),
         });
         logger.warn("claw-aegis: 检测到用户风险请求", {
@@ -655,6 +773,9 @@ export function createClawAegisRuntime(
           hook: "message_received",
           sessionKey,
           flags: match.flags,
+          enforceFlags,
+          observeFlags,
+          result: eventResult,
         });
         logDefenseResult(logger, {
           hook: "message_received",
@@ -1634,7 +1755,8 @@ export function createClawAegisRuntime(
           sessionKey,
         });
 
-        if (!config.toolResultScanEnabled) {
+        const liveCfg = getLiveConfig();
+        if (!liveCfg.toolResultScanEnabled) {
           const durationMs = now() - startedAt;
           logDefenseResult(logger, {
             hook: "before_message_write",
@@ -1708,9 +1830,25 @@ export function createClawAegisRuntime(
               rewritten: sanitized.changed,
             });
           }
-          const outcome = scanToolResultText(extracted.text, extracted.oversize);
-          state.noteToolResult(sessionKey, outcome);
-          const encodedRiskFlags = outcome.riskFlags.filter((flag) => flag.startsWith("encoded-"));
+          const outcome = scanToolResultText(
+            extracted.text,
+            extracted.oversize,
+            liveCfg.disabledToolResultFlags,
+          );
+          // Partition flags by observe-only mode: enforce-mode flags drive
+          // turn state + dynamic runtime-risk reminders; observe-mode flags
+          // are still emitted as defense events for visibility but do NOT
+          // propagate into state, so the LLM is not nudged.
+          const trObserveSet = new Set(liveCfg.observeOnlyToolResultFlags ?? []);
+          const enforceFlags = outcome.riskFlags.filter((flag) => {
+            const base = flag.startsWith("encoded-") ? flag.slice("encoded-".length) : flag;
+            return !trObserveSet.has(base);
+          });
+          const stateOutcome = enforceFlags.length === outcome.riskFlags.length
+            ? outcome
+            : { ...outcome, riskFlags: enforceFlags };
+          state.noteToolResult(sessionKey, stateOutcome);
+          const encodedRiskFlags = enforceFlags.filter((flag) => flag.startsWith("encoded-"));
           if (encodedRiskFlags.length > 0) {
             state.noteRuntimeRisk(sessionKey, encodedRiskFlags);
           }

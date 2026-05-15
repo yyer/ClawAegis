@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 const CLAW_AEGIS_PLUGIN_ID = "claw-aegis";
 const DEFENSE_MODES = ["off", "observe", "enforce"];
 const TURN_STATE_TTL_MS = 5 * 6e4;
@@ -63,6 +65,25 @@ const clawAegisPluginConfigSchema = {
     loopGuardMode: defaultDefenseModeSchema,
     exfiltrationGuardEnabled: defaultEnabledBooleanSchema,
     exfiltrationGuardMode: defaultDefenseModeSchema,
+    toolCallEnforcementEnabled: defaultEnabledBooleanSchema,
+    dispatchGuardEnabled: defaultEnabledBooleanSchema,
+    dispatchGuardMode: defaultDefenseModeSchema,
+    disabledUserRiskFlags: {
+      type: "array",
+      items: { type: "string" }
+    },
+    observeOnlyUserRiskFlags: {
+      type: "array",
+      items: { type: "string" }
+    },
+    disabledToolResultFlags: {
+      type: "array",
+      items: { type: "string" }
+    },
+    observeOnlyToolResultFlags: {
+      type: "array",
+      items: { type: "string" }
+    },
     protectedPaths: {
       type: "array",
       items: { type: "string" }
@@ -269,8 +290,43 @@ function readDefenseMode(raw, params) {
   const explicitMode = raw[params.modeKey];
   return isDefenseMode(explicitMode) ? explicitMode : params.defaultMode;
 }
+function userConfigCandidatePaths(rootDir) {
+  const out = [];
+  const home = os.homedir();
+  if (home) {
+    out.push(path.join(home, ".openclaw", "workspace", "skills", "claw-aegis", "user_config.json"));
+  }
+  if (rootDir) out.push(path.join(rootDir, "user_config.json"));
+  if (home) {
+    out.push(path.join(home, ".openclaw", "skills", "claw-aegis", "user_config.json"));
+  }
+  return out;
+}
+function findUserConfigPath(rootDir) {
+  for (const candidate of userConfigCandidatePaths(rootDir)) {
+    try { if (fs.existsSync(candidate)) return candidate; } catch {}
+  }
+  return undefined;
+}
+function getUserConfigMtimeMs(rootDir) {
+  const target = findUserConfigPath(rootDir);
+  if (!target) return 0;
+  try { return fs.statSync(target).mtimeMs; } catch { return 0; }
+}
+function readUserConfigOverride(rootDir) {
+  const target = findUserConfigPath(rootDir);
+  if (!target) return {};
+  try {
+    const text = fs.readFileSync(target, "utf8");
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch {}
+  return {};
+}
 function resolveClawAegisPluginConfig(api) {
-  const raw = api.pluginConfig ?? {};
+  const baseConfig = api.pluginConfig ?? {};
+  const override = readUserConfigOverride(api.rootDir);
+  const raw = { ...baseConfig, ...override };
   const allDefensesEnabled = raw.allDefensesEnabled !== false;
   const defaultBlockingMode = isDefenseMode(raw.defaultBlockingMode) ? raw.defaultBlockingMode : "enforce";
   const selfProtectionMode = readDefenseMode(raw, {
@@ -315,6 +371,12 @@ function resolveClawAegisPluginConfig(api) {
     defaultMode: defaultBlockingMode,
     allDefensesEnabled
   });
+  const dispatchGuardMode = readDefenseMode(raw, {
+    enabledKey: "dispatchGuardEnabled",
+    modeKey: "dispatchGuardMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled
+  });
   return {
     allDefensesEnabled,
     defaultBlockingMode,
@@ -337,12 +399,19 @@ function resolveClawAegisPluginConfig(api) {
     loopGuardMode,
     exfiltrationGuardEnabled: exfiltrationGuardMode !== "off",
     exfiltrationGuardMode,
+    toolCallEnforcementEnabled: readEnabledFlag(raw, "toolCallEnforcementEnabled", allDefensesEnabled),
+    dispatchGuardEnabled: dispatchGuardMode !== "off",
+    dispatchGuardMode,
     protectedPaths: normalizeStringList(raw.protectedPaths, api.resolvePath),
     protectedSkills: normalizeIdentifierList(raw.protectedSkills),
     protectedPlugins: normalizeIdentifierList(raw.protectedPlugins),
     skillRoots: normalizeStringList(raw.skillRoots, api.resolvePath),
     extraProtectedRoots: normalizeStringList(raw.extraProtectedRoots, api.resolvePath),
-    startupSkillScan: raw.startupSkillScan !== false
+    startupSkillScan: raw.startupSkillScan !== false,
+    disabledUserRiskFlags: normalizeIdentifierList(raw.disabledUserRiskFlags),
+    observeOnlyUserRiskFlags: normalizeIdentifierList(raw.observeOnlyUserRiskFlags),
+    disabledToolResultFlags: normalizeIdentifierList(raw.disabledToolResultFlags),
+    observeOnlyToolResultFlags: normalizeIdentifierList(raw.observeOnlyToolResultFlags)
   };
 }
 function resolveClawAegisStateDir(api) {
@@ -388,5 +457,8 @@ export {
   clawAegisPluginUiHints,
   resolveClawAegisPluginConfig,
   resolveClawAegisStateDir,
-  resolveSkillScanRoots
+  resolveSkillScanRoots,
+  userConfigCandidatePaths,
+  findUserConfigPath,
+  getUserConfigMtimeMs
 };

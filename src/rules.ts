@@ -2116,12 +2116,21 @@ export function resolveOutsideWorkspaceDeletionViolation(
   };
 }
 
-export function detectUserRiskFlags(text: string): UserRiskMatch {
+export function detectUserRiskFlags(
+  text: string,
+  disabledFlags?: ReadonlySet<string> | readonly string[],
+): UserRiskMatch {
   const flags = collectPatternRiskFlags(text, USER_RISK_RULES);
   if (mentionsSensitivePathTarget(text) && hasSensitivePathOperation(text)) {
     flags.push("sensitive-path-access");
   }
-  return { flags: [...new Set(flags)] };
+  const unique = [...new Set(flags)];
+  if (!disabledFlags) {
+    return { flags: unique };
+  }
+  const disabled =
+    disabledFlags instanceof Set ? disabledFlags : new Set(disabledFlags);
+  return { flags: unique.filter((f) => !disabled.has(f)) };
 }
 
 export function buildStaticSystemContext(params?: {
@@ -2816,13 +2825,26 @@ export function sanitizeAssistantMessage(
   };
 }
 
-export function scanToolResultText(text: string, oversize = false): ToolResultScanOutcome {
+export function scanToolResultText(
+  text: string,
+  oversize = false,
+  disabledFlags?: ReadonlySet<string> | readonly string[],
+): ToolResultScanOutcome {
   const riskFlags = collectPatternRiskFlags(text, TOOL_RESULT_RISK_RULES);
   const encodedInspection = inspectEncodedCandidates(text, {
     analyzeDecoded: analyzeDecodedToolResultText,
   });
   const encodedFlags = encodedInspection.findings.flatMap((finding) => finding.riskFlags);
-  const uniqueRiskFlags = [...new Set([...riskFlags, ...encodedFlags])];
+  let uniqueRiskFlags = [...new Set([...riskFlags, ...encodedFlags])];
+  if (disabledFlags) {
+    const disabled =
+      disabledFlags instanceof Set ? disabledFlags : new Set(disabledFlags);
+    uniqueRiskFlags = uniqueRiskFlags.filter((flag) => {
+      if (disabled.has(flag)) return false;
+      if (flag.startsWith("encoded-") && disabled.has(flag.slice("encoded-".length))) return false;
+      return true;
+    });
+  }
   const suspicious =
     findExplicitGroupMatch(text) ||
     encodedInspection.findings.some((finding) =>
@@ -2832,7 +2854,7 @@ export function scanToolResultText(text: string, oversize = false): ToolResultSc
           "encoded-policy-bypass",
           "encoded-tool-induction",
           "encoded-exfiltration-request",
-        ].includes(flag),
+        ].includes(flag) && uniqueRiskFlags.includes(flag),
       ),
     ) ||
     uniqueRiskFlags.length >= 2;

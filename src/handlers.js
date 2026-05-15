@@ -8,6 +8,7 @@ import {
   STARTUP_SCAN_BUDGET_MS
 } from "./config.js";
 import {
+  getUserConfigMtimeMs,
   resolveClawAegisPluginConfig,
   resolveClawAegisStateDir,
   resolveSkillScanRoots
@@ -265,6 +266,38 @@ function resolveToolCallDefenseMode(modes, source) {
 function isDefenseEnabled(mode) {
   return mode !== "off";
 }
+const SECPLANE_INGEST_PATH = "/api/v1/secplane/agent/sec_events/batch";
+function postEventToSecplane(record) {
+  const baseURL = process.env.CLAWMANAGER_AGENT_BASE_URL;
+  const token = process.env.CLAWMANAGER_INSTANCE_TOKEN || process.env.CLAWMANAGER_LLM_API_KEY;
+  if (!baseURL || !token) return;
+  const event = {
+    event_id: `aegis-${record.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    ts: new Date(record.timestamp).toISOString(),
+    hook: "claw-aegis",
+    defense: record.defense,
+    rule_id: record.defense,
+    rule_name: record.defense,
+    severity: record.result === "blocked" ? "high" : "medium",
+    result: record.result,
+    reason: record.reason ?? "",
+    subject: record.toolName !== undefined ? `tool.${record.toolName}` : "claw-aegis.event",
+    evidence: record.commandText ?? record.userInput ?? "",
+    raw_payload: JSON.stringify({ details: record.details, toolParams: record.toolParams }).slice(0, 2048)
+  };
+  const url = baseURL.replace(/\/$/, "") + SECPLANE_INGEST_PATH;
+  const body = JSON.stringify({ source: "aegis", events: [event] });
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 3000);
+  const f = globalThis.fetch;
+  if (!f) { clearTimeout(timer); return; }
+  f(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body,
+    signal: ac.signal
+  }).catch(() => {}).finally(() => clearTimeout(timer));
+}
 function createDefenseEventWriter(stateDir) {
   const eventsPath = path.join(stateDir, DEFENSE_EVENTS_FILENAME);
   let ensured = false;
@@ -278,6 +311,7 @@ function createDefenseEventWriter(stateDir) {
       await fs.appendFile(eventsPath, line, "utf8");
     };
     doWrite().catch(() => {});
+    try { postEventToSecplane(record); } catch {}
   };
 }
 function createSkillScanEventWriter(stateDir) {
@@ -315,6 +349,29 @@ function createClawAegisRuntime(api, options) {
   const stateDir = resolveClawAegisStateDir(api);
   const emitDefenseEvent = createDefenseEventWriter(stateDir);
   const config = resolveClawAegisPluginConfig(api);
+  let liveConfig = config;
+  let liveConfigMtimeMs = getUserConfigMtimeMs(api.rootDir);
+  const getLiveConfig = () => {
+    const mt = getUserConfigMtimeMs(api.rootDir);
+    if (mt !== 0 && mt !== liveConfigMtimeMs) {
+      try {
+        liveConfig = resolveClawAegisPluginConfig(api);
+        liveConfigMtimeMs = mt;
+        logger.info("claw-aegis: user_config.json 已热重载", {
+          event: "user_config_hot_reload",
+          mtimeMs: mt,
+          userRiskScanEnabled: liveConfig.userRiskScanEnabled,
+          disabledUserRiskFlags: liveConfig.disabledUserRiskFlags
+        });
+      } catch (error) {
+        logger.warn("claw-aegis: user_config.json 热重载失败，沿用上次配置", {
+          event: "user_config_hot_reload_failed",
+          reason: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    return liveConfig;
+  };
   const skillScanRoots = resolveSkillScanRoots(api);
   const state = new ClawAegisState({ stateDir, logger, now: options?.now });
   const emitSkillScanEvent = createSkillScanEventWriter(stateDir);
@@ -421,7 +478,8 @@ function createClawAegisRuntime(api, options) {
           mechanism: "user_risk_scan",
           sessionKey
         });
-        if (!config.userRiskScanEnabled) {
+        const liveCfg = getLiveConfig();
+        if (!liveCfg.userRiskScanEnabled) {
           const durationMs2 = now() - startedAt;
           logDefenseResult(logger, {
             hook: "message_received",
@@ -439,55 +497,53 @@ function createClawAegisRuntime(api, options) {
           });
           return;
         }
-        if (!sessionKey) {
-          const durationMs2 = now() - startedAt;
-          logDefenseResult(logger, {
-            hook: "message_received",
-            mechanism: "user_risk_scan",
-            result: "skipped_missing_session",
-            durationMs: durationMs2
-          });
-          logDefenseFinish(logger, {
-            hook: "message_received",
-            mechanism: "user_risk_scan",
-            result: "skipped_missing_session",
-            durationMs: durationMs2
-          });
-          return;
-        }
-        const match = detectUserRiskFlags(event.content ?? "");
+        const effectiveSessionKey = sessionKey ?? "anonymous";
+        const match = detectUserRiskFlags(event.content ?? "", liveCfg.disabledUserRiskFlags);
         const durationMs = now() - startedAt;
         if (match.flags.length === 0) {
           logDefenseResult(logger, {
             hook: "message_received",
             mechanism: "user_risk_scan",
-            sessionKey,
+            sessionKey: effectiveSessionKey,
             result: "clear",
             durationMs
           });
           logDefenseFinish(logger, {
             hook: "message_received",
             mechanism: "user_risk_scan",
-            sessionKey,
+            sessionKey: effectiveSessionKey,
             result: "clear",
             durationMs
           });
           return;
         }
-        state.noteUserRisk(sessionKey, match.flags);
+        const observeOnlySet = new Set(liveCfg.observeOnlyUserRiskFlags ?? []);
+        const enforceFlags = [];
+        const observeFlags = [];
+        for (const flag of match.flags) {
+          if (observeOnlySet.has(flag)) observeFlags.push(flag);
+          else enforceFlags.push(flag);
+        }
+        if (sessionKey && enforceFlags.length > 0) {
+          state.noteUserRisk(sessionKey, enforceFlags);
+        }
+        const eventResult = enforceFlags.length > 0 ? "blocked" : "observed";
         emitDefenseEvent({
           timestamp: now(),
           defense: "user_risk_scan",
-          result: "observed",
+          result: eventResult,
           reason: `检测到风险标记: ${match.flags.join(", ")}`,
-          details: { flags: match.flags },
+          details: { flags: match.flags, enforceFlags, observeFlags },
           userInput: (event.content ?? "").slice(0, 500)
         });
         logger.warn("claw-aegis: \u68C0\u6D4B\u5230\u7528\u6237\u98CE\u9669\u8BF7\u6C42", {
           event: "user_risk_detected",
           hook: "message_received",
           sessionKey,
-          flags: match.flags
+          flags: match.flags,
+          enforceFlags,
+          observeFlags,
+          result: eventResult
         });
         logDefenseResult(logger, {
           hook: "message_received",
@@ -1152,7 +1208,8 @@ function createClawAegisRuntime(api, options) {
           mechanism: "tool_result_scan",
           sessionKey
         });
-        if (!config.toolResultScanEnabled) {
+        const liveCfg = getLiveConfig();
+        if (!liveCfg.toolResultScanEnabled) {
           const durationMs = now() - startedAt;
           logDefenseResult(logger, {
             hook: "before_message_write",
@@ -1223,9 +1280,21 @@ function createClawAegisRuntime(api, options) {
               rewritten: sanitized.changed
             });
           }
-          const outcome = scanToolResultText(extracted.text, extracted.oversize);
-          state.noteToolResult(sessionKey, outcome);
-          const encodedRiskFlags = outcome.riskFlags.filter((flag) => flag.startsWith("encoded-"));
+          const outcome = scanToolResultText(
+            extracted.text,
+            extracted.oversize,
+            liveCfg.disabledToolResultFlags
+          );
+          const trObserveSet = new Set(liveCfg.observeOnlyToolResultFlags ?? []);
+          const enforceFlags = outcome.riskFlags.filter((flag) => {
+            const base = flag.startsWith("encoded-") ? flag.slice("encoded-".length) : flag;
+            return !trObserveSet.has(base);
+          });
+          const stateOutcome = enforceFlags.length === outcome.riskFlags.length
+            ? outcome
+            : { ...outcome, riskFlags: enforceFlags };
+          state.noteToolResult(sessionKey, stateOutcome);
+          const encodedRiskFlags = enforceFlags.filter((flag) => flag.startsWith("encoded-"));
           if (encodedRiskFlags.length > 0) {
             state.noteRuntimeRisk(sessionKey, encodedRiskFlags);
           }

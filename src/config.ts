@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import type { OpenClawPluginApi, OpenClawPluginConfigSchema } from "../runtime-api.js";
 
 export const CLAW_AEGIS_PLUGIN_ID = "claw-aegis";
@@ -76,6 +78,26 @@ export type ClawAegisPluginConfig = {
   skillRoots: string[];
   extraProtectedRoots: string[];
   startupSkillScan: boolean;
+  // Names of built-in user_risk_scan flags that ClawAegis should suppress.
+  // Driven from secplane policy via the per-rule on/off toggles, so each
+  // ClawManager rule switch maps to a concrete pod-side behavior change.
+  disabledUserRiskFlags: string[];
+  // Names of built-in user_risk_scan flags that ClawAegis should record
+  // ("observe") but NOT actually enforce. When a flag is in this list, the
+  // matched user input still produces a defense event (action=observed)
+  // but state.noteUserRisk() is skipped, so the dynamic userRisk prompt
+  // guard reminder does NOT get injected and downstream LLM behavior is
+  // unchanged. Driven by secplane rule mode=observe.
+  observeOnlyUserRiskFlags: string[];
+  // Same semantics as disabledUserRiskFlags but for TOOL_RESULT_RISK_RULES
+  // flags surfaced by scanToolResultText. Flags listed here are filtered
+  // out of `outcome.riskFlags` (both base flags and their encoded-* twin).
+  disabledToolResultFlags: string[];
+  // Same as observeOnlyUserRiskFlags but for tool_result flags: matching
+  // is still recorded but `state.noteRuntimeRisk` is suppressed for the
+  // encoded-* derivatives, so the dynamic runtime-risk prompt guard does
+  // not nudge the LLM. Driven by secplane rule mode=observe.
+  observeOnlyToolResultFlags: string[];
 };
 
 const defaultEnabledBooleanSchema = {
@@ -140,6 +162,22 @@ export const clawAegisPluginConfigSchema = {
     startupSkillScan: {
       type: "boolean",
       default: true,
+    },
+    disabledUserRiskFlags: {
+      type: "array",
+      items: { type: "string" },
+    },
+    observeOnlyUserRiskFlags: {
+      type: "array",
+      items: { type: "string" },
+    },
+    disabledToolResultFlags: {
+      type: "array",
+      items: { type: "string" },
+    },
+    observeOnlyToolResultFlags: {
+      type: "array",
+      items: { type: "string" },
     },
   },
 } satisfies OpenClawPluginConfigSchema["jsonSchema"];
@@ -391,8 +429,82 @@ function readDefenseMode(
   return isDefenseMode(explicitMode) ? explicitMode : params.defaultMode;
 }
 
+// Path 1: read pluginConfig as injected by the OpenClaw host. Path 2 (added
+// for secplane policy push): if a `user_config.json` file is present in one
+// of the candidate paths, merge it on top — this lets ClawManager
+// re-distribute configuration via the existing skill upload + install_skill
+// channel:
+//   secplane.compile(rules) -> user_config.json -> rezip -> skills/import
+//   -> instances/:id/skills (attach) -> agent installs at workspace/skills/
+//   -> ClawAegis reads it on the next hook event (mtime-watched reload).
+//
+// Priority order (first existing wins):
+//   1. ~/.openclaw/workspace/skills/claw-aegis/user_config.json
+//        — this is where `install_skill` extracts the dispatched bundle.
+//          Putting it first means ClawManager dispatches are authoritative.
+//   2. <rootDir>/user_config.json
+//        — developer-local override next to the loaded plugin source.
+//          Useful for poking at config during local development without
+//          touching the secplane pipeline.
+//   3. ~/.openclaw/skills/claw-aegis/user_config.json
+//        — legacy install location, kept for compatibility.
+export function userConfigCandidatePaths(rootDir: string | undefined): string[] {
+  const out: string[] = [];
+  const home = os.homedir();
+  if (home) {
+    out.push(path.join(home, ".openclaw", "workspace", "skills", "claw-aegis", "user_config.json"));
+  }
+  if (rootDir) out.push(path.join(rootDir, "user_config.json"));
+  if (home) {
+    out.push(path.join(home, ".openclaw", "skills", "claw-aegis", "user_config.json"));
+  }
+  return out;
+}
+
+// getUserConfigMtimeMs returns the mtime in ms of the *currently winning*
+// user_config.json among the candidate paths, or 0 if none exists.
+// Used by callers that want to cheaply detect "dispatch happened, my
+// in-memory config is stale" without re-parsing JSON on every event.
+export function getUserConfigMtimeMs(rootDir: string | undefined): number {
+  const target = findUserConfigPath(rootDir);
+  if (!target) return 0;
+  try {
+    return fs.statSync(target).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+export function findUserConfigPath(rootDir: string | undefined): string | undefined {
+  for (const candidate of userConfigCandidatePaths(rootDir)) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // ignore and keep searching
+    }
+  }
+  return undefined;
+}
+
+function readUserConfigOverride(rootDir: string | undefined): Record<string, unknown> {
+  const target = findUserConfigPath(rootDir);
+  if (!target) return {};
+  try {
+    const text = fs.readFileSync(target, "utf8");
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // best-effort: a malformed override should not break the plugin
+  }
+  return {};
+}
+
 export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisPluginConfig {
-  const raw = (api.pluginConfig ?? {}) as Record<string, unknown>;
+  const baseConfig = (api.pluginConfig ?? {}) as Record<string, unknown>;
+  const override = readUserConfigOverride(api.rootDir);
+  const raw: Record<string, unknown> = { ...baseConfig, ...override };
   const allDefensesEnabled = raw.allDefensesEnabled !== false;
   const defaultBlockingMode = isDefenseMode(raw.defaultBlockingMode)
     ? raw.defaultBlockingMode
@@ -476,6 +588,10 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     skillRoots: normalizeStringList(raw.skillRoots, api.resolvePath),
     extraProtectedRoots: normalizeStringList(raw.extraProtectedRoots, api.resolvePath),
     startupSkillScan: raw.startupSkillScan !== false,
+    disabledUserRiskFlags: normalizeIdentifierList(raw.disabledUserRiskFlags),
+    observeOnlyUserRiskFlags: normalizeIdentifierList(raw.observeOnlyUserRiskFlags),
+    disabledToolResultFlags: normalizeIdentifierList(raw.disabledToolResultFlags),
+    observeOnlyToolResultFlags: normalizeIdentifierList(raw.observeOnlyToolResultFlags),
   };
 }
 

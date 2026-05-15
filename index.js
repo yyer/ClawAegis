@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import { definePluginEntry } from "./runtime-api.js";
-import { clawAegisPluginConfigDefinition } from "./src/config.js";
+import { clawAegisPluginConfigDefinition, findUserConfigPath } from "./src/config.js";
 import { createClawAegisRuntime } from "./src/handlers.js";
+
 function wrapHookFailOpen(api, hookName, handler) {
   return async (event, ctx) => {
     try {
@@ -13,42 +15,65 @@ function wrapHookFailOpen(api, hookName, handler) {
     }
   };
 }
+
+const HOT_RELOAD_POLL_MS = 1000;
+function snapshotConfigMtime(rootDir) {
+  const target = findUserConfigPath(rootDir);
+  if (!target) return 0;
+  try { return fs.statSync(target).mtimeMs; } catch { return 0; }
+}
+
 function registerClawAegisPlugin(api, createRuntime = createClawAegisRuntime) {
   try {
-    const runtime = createRuntime(api);
-    api.on("gateway_start", wrapHookFailOpen(api, "gateway_start", runtime.hooks.gateway_start));
-    api.on(
-      "message_received",
-      wrapHookFailOpen(api, "message_received", runtime.hooks.message_received)
-    );
-    api.on(
-      "message_sending",
-      wrapHookFailOpen(api, "message_sending", runtime.hooks.message_sending)
-    );
-    api.on(
-      "before_prompt_build",
-      wrapHookFailOpen(api, "before_prompt_build", runtime.hooks.before_prompt_build)
-    );
-    api.on(
-      "before_tool_call",
-      wrapHookFailOpen(api, "before_tool_call", runtime.hooks.before_tool_call)
-    );
-    api.on(
-      "after_tool_call",
-      wrapHookFailOpen(api, "after_tool_call", runtime.hooks.after_tool_call)
-    );
-    api.on(
-      "before_message_write",
-      wrapHookFailOpen(api, "before_message_write", runtime.hooks.before_message_write)
-    );
-    api.on("agent_end", wrapHookFailOpen(api, "agent_end", runtime.hooks.agent_end));
-    api.on("session_end", wrapHookFailOpen(api, "session_end", runtime.hooks.session_end));
+    let runtime = createRuntime(api);
+    let lastMtime = snapshotConfigMtime(api.rootDir);
+
+    const reload = () => {
+      try {
+        runtime = createRuntime(api);
+        api.logger.info(`[claw-aegis] hot-reloaded user_config (mtime=${lastMtime})`);
+      } catch (error) {
+        api.logger.error(
+          `[claw-aegis] hot-reload failed; keeping previous runtime: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    };
+
+    const interval = setInterval(() => {
+      const mtime = snapshotConfigMtime(api.rootDir);
+      if (mtime !== 0 && mtime !== lastMtime) {
+        lastMtime = mtime;
+        reload();
+      }
+    }, HOT_RELOAD_POLL_MS);
+    if (typeof interval.unref === "function") interval.unref();
+
+    const dispatch = (name) =>
+      wrapHookFailOpen(api, name, (event, ctx) => {
+        const fn = runtime.hooks[name];
+        if (typeof fn !== "function") return undefined;
+        return fn(event, ctx);
+      });
+
+    api.on("gateway_start", dispatch("gateway_start"));
+    api.on("message_received", dispatch("message_received"));
+    api.on("message_sending", dispatch("message_sending"));
+    api.on("before_prompt_build", dispatch("before_prompt_build"));
+    api.on("before_dispatch", dispatch("before_dispatch"));
+    api.on("before_agent_reply", dispatch("before_agent_reply"));
+    api.on("before_tool_call", dispatch("before_tool_call"));
+    api.on("after_tool_call", dispatch("after_tool_call"));
+    api.on("before_message_write", dispatch("before_message_write"));
+    api.on("llm_output", dispatch("llm_output"));
+    api.on("agent_end", dispatch("agent_end"));
+    api.on("session_end", dispatch("session_end"));
   } catch (error) {
     api.logger.error(
       `[claw-aegis] register failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
+
 var index_default = definePluginEntry({
   id: "claw-aegis",
   name: "Claw Aegis",
@@ -58,6 +83,7 @@ var index_default = definePluginEntry({
     registerClawAegisPlugin(api);
   }
 });
+
 export {
   index_default as default,
   registerClawAegisPlugin,
