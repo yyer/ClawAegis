@@ -13,3 +13,8 @@ web/shared/tsconfig.tsbuildinfo
 # OS
 .DS_Store
 Thumbs.db
+# Local build staging
+.build-staging/
+
+# Internal docs (do not push)
+ClawAegis-需求文档_*.md

@@ -3,7 +3,25 @@ import { definePluginEntry } from "./runtime-api.js";
 import { clawAegisPluginConfigDefinition, findUserConfigPath } from "./src/config.js";
 import { createClawAegisRuntime } from "./src/handlers.js";
 
-function wrapHookFailOpen(api, hookName, handler) {
+// openclaw 把每个 hook 的同步/异步当成契约的一部分。如果同步 hook 的 handler
+// 返回 Promise，openclaw 直接丢弃返回值 (实测 before_message_write 的 redacted
+// message 因此从未被应用)。所以同步 hook 必须同步包，async hook 才能 async 包。
+const ASYNC_HOOK_NAMES = new Set(["before_prompt_build"]);
+
+function wrapHookFailOpenSync(api, hookName, handler) {
+  return (event, ctx) => {
+    try {
+      return handler(event, ctx);
+    } catch (error) {
+      api.logger.error(
+        `[claw-aegis] ${hookName} failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return void 0;
+    }
+  };
+}
+
+function wrapHookFailOpenAsync(api, hookName, handler) {
   return async (event, ctx) => {
     try {
       return await handler(event, ctx);
@@ -14,6 +32,12 @@ function wrapHookFailOpen(api, hookName, handler) {
       return void 0;
     }
   };
+}
+
+function wrapHookFailOpen(api, hookName, handler) {
+  return ASYNC_HOOK_NAMES.has(hookName)
+    ? wrapHookFailOpenAsync(api, hookName, handler)
+    : wrapHookFailOpenSync(api, hookName, handler);
 }
 
 const HOT_RELOAD_POLL_MS = 1000;
