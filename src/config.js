@@ -68,6 +68,23 @@ const clawAegisPluginConfigSchema = {
     toolCallEnforcementEnabled: defaultEnabledBooleanSchema,
     dispatchGuardEnabled: defaultEnabledBooleanSchema,
     dispatchGuardMode: defaultDefenseModeSchema,
+    requireHttpsEnabled: defaultEnabledBooleanSchema,
+    requireHttpsMode: defaultDefenseModeSchema,
+    outboundTrustEnabled: defaultEnabledBooleanSchema,
+    outboundTrustMode: defaultDefenseModeSchema,
+    killSwitchEnabled: { type: "boolean", default: false },
+    killSwitchReason: { type: "string", default: "" },
+    outboundTrustedEndpoints: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          domain: { type: "string" },
+          fingerprint: { type: "string" },
+          label: { type: "string" }
+        }
+      }
+    },
     disabledUserRiskFlags: {
       type: "array",
       items: { type: "string" }
@@ -377,6 +394,27 @@ function resolveClawAegisPluginConfig(api) {
     defaultMode: defaultBlockingMode,
     allDefensesEnabled
   });
+  const requireHttpsMode = readDefenseMode(raw, {
+    enabledKey: "requireHttpsEnabled",
+    modeKey: "requireHttpsMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled
+  });
+  const outboundTrustMode = readDefenseMode(raw, {
+    enabledKey: "outboundTrustEnabled",
+    modeKey: "outboundTrustMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled
+  });
+  const outboundTrustedEndpoints = Array.isArray(raw.outboundTrustedEndpoints)
+    ? raw.outboundTrustedEndpoints
+        .filter((e) => e && typeof e === "object" && typeof e.domain === "string" && e.domain)
+        .map((e) => ({
+          domain: String(e.domain).toLowerCase(),
+          fingerprint: typeof e.fingerprint === "string" ? e.fingerprint.toLowerCase() : "",
+          label: typeof e.label === "string" ? e.label : ""
+        }))
+    : [];
   return {
     allDefensesEnabled,
     defaultBlockingMode,
@@ -402,6 +440,13 @@ function resolveClawAegisPluginConfig(api) {
     toolCallEnforcementEnabled: readEnabledFlag(raw, "toolCallEnforcementEnabled", allDefensesEnabled),
     dispatchGuardEnabled: dispatchGuardMode !== "off",
     dispatchGuardMode,
+    requireHttpsEnabled: requireHttpsMode !== "off",
+    requireHttpsMode,
+    outboundTrustEnabled: outboundTrustMode !== "off",
+    outboundTrustMode,
+    outboundTrustedEndpoints,
+    killSwitchEnabled: raw.killSwitchEnabled === true,
+    killSwitchReason: typeof raw.killSwitchReason === "string" ? raw.killSwitchReason : "",
     protectedPaths: normalizeStringList(raw.protectedPaths, api.resolvePath),
     protectedSkills: normalizeIdentifierList(raw.protectedSkills),
     protectedPlugins: normalizeIdentifierList(raw.protectedPlugins),

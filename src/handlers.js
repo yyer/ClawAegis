@@ -288,7 +288,8 @@ function postEventToSecplane(record) {
   const url = baseURL.replace(/\/$/, "") + SECPLANE_INGEST_PATH;
   const body = JSON.stringify({ source: "aegis", events: [event] });
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 3000);
+  // 30s timeout — see handlers.ts for rationale (ingest endpoint slowness).
+  const timer = setTimeout(() => ac.abort(), 30000);
   const f = globalThis.fetch;
   if (!f) { clearTimeout(timer); return; }
   f(url, {
@@ -834,6 +835,158 @@ function createClawAegisRuntime(api, options) {
           runId,
           toolName: normalizedToolName
         });
+        // --- kill switch (应急熔断): 启用时无条件阻断所有工具调用 ---
+        // 这是最优先的拦截，跑在所有 defense strategies 之前。
+        const liveCfgKill = getLiveConfig();
+        if (liveCfgKill.killSwitchEnabled === true) {
+          const reason = `应急熔断已启用${liveCfgKill.killSwitchReason ? `：${liveCfgKill.killSwitchReason}` : ""}`;
+          emitDefenseEvent({
+            timestamp: now(),
+            defense: "kill_switch",
+            result: "blocked",
+            reason,
+            toolName: normalizedToolName,
+            details: { killSwitchReason: liveCfgKill.killSwitchReason || "" },
+            toolParams: normalizedParams,
+            userInput: sessionKey ? state.peekLastUserInput(sessionKey) : void 0
+          });
+          logger.warn("claw-aegis: 应急熔断阻断工具调用", {
+            event: "kill_switch_blocked",
+            hook: "before_tool_call",
+            sessionKey,
+            runId,
+            toolName: normalizedToolName,
+            reason: liveCfgKill.killSwitchReason || ""
+          });
+          const totalDurationMs = now() - toolGuardStartedAt;
+          logDefenseFinish(logger, {
+            hook: "before_tool_call",
+            mechanism: "tool_call_guard",
+            sessionKey,
+            runId,
+            toolName: normalizedToolName,
+            result: "blocked",
+            durationMs: totalDurationMs,
+            blockedBy: "kill_switch"
+          });
+          return { block: true, blockReason: reason };
+        }
+        // --- require-https: 阻止 http:// / ws:// / ftp:// 等明文出站 ---
+        // 跑在常规 strategies 之前，独立 defense。mode: enforce 阻断 + 告警，
+        // observe 仅告警，off 跳过。
+        const liveCfgHttps = getLiveConfig();
+        const requireHttpsMode = liveCfgHttps.requireHttpsMode ?? "off";
+        if (requireHttpsMode === "enforce" || requireHttpsMode === "observe") {
+          const paramsBlob = JSON.stringify(normalizedParams ?? {});
+          const insecureRe = /\b(http|ws|ftp):\/\/[^\s'"`<>]+/gi;
+          const allMatches = paramsBlob.match(insecureRe) ?? [];
+          const insecure = allMatches.filter((u) => /^(http|ws|ftp):\/\//i.test(u));
+          if (insecure.length > 0) {
+            const sample = insecure.slice(0, 5);
+            const reason = `明文协议 (${sample.map((u) => u.split(/[?#]/)[0]).join(", ")})，必须改用 https/wss`;
+            emitDefenseEvent({
+              timestamp: now(),
+              defense: "require_https",
+              result: requireHttpsMode === "enforce" ? "blocked" : "observed",
+              reason,
+              toolName: normalizedToolName,
+              details: { urls: sample, count: insecure.length },
+              toolParams: normalizedParams,
+              userInput: sessionKey ? state.peekLastUserInput(sessionKey) : void 0
+            });
+            logger.warn(
+              requireHttpsMode === "enforce"
+                ? "claw-aegis: 阻断明文网络调用"
+                : "claw-aegis: 观察到明文网络调用",
+              {
+                event: requireHttpsMode === "enforce" ? "require_https_blocked" : "require_https_observed",
+                hook: "before_tool_call",
+                sessionKey,
+                runId,
+                toolName: normalizedToolName,
+                mode: requireHttpsMode,
+                urls: sample
+              }
+            );
+            if (requireHttpsMode === "enforce") {
+              const totalDurationMs = now() - toolGuardStartedAt;
+              logDefenseFinish(logger, {
+                hook: "before_tool_call",
+                mechanism: "tool_call_guard",
+                sessionKey,
+                runId,
+                toolName: normalizedToolName,
+                result: "blocked",
+                durationMs: totalDurationMs,
+                blockedBy: "require_https"
+              });
+              return { block: true, blockReason: reason };
+            }
+          }
+        }
+        // --- outbound-trust: 域名白名单 (Phase 1 — fingerprint pin 留待 Phase 2) ---
+        const outboundTrustMode = liveCfgHttps.outboundTrustMode ?? "off";
+        const trustedList = liveCfgHttps.outboundTrustedEndpoints ?? [];
+        if ((outboundTrustMode === "enforce" || outboundTrustMode === "observe") && trustedList.length > 0) {
+          const paramsBlobHosts = JSON.stringify(normalizedParams ?? {});
+          const httpsUrls = (paramsBlobHosts.match(/\b(https|wss):\/\/[^\s'"`<>]+/gi) ?? []);
+          const matchHost = (hostname, pattern) => {
+            const h = hostname.toLowerCase();
+            const p = pattern.toLowerCase();
+            if (p.startsWith("*.")) return h === p.slice(2) || h.endsWith(p.slice(1));
+            return h === p;
+          };
+          const blockedUrls = [];
+          for (const u of httpsUrls) {
+            let host = "";
+            try { host = new URL(u).hostname; } catch { host = ""; }
+            if (!host) continue;
+            const allowed = trustedList.some((e) => matchHost(host, e.domain));
+            if (!allowed) blockedUrls.push(`${host} (${u.split(/[?#]/)[0]})`);
+          }
+          if (blockedUrls.length > 0) {
+            const sample = blockedUrls.slice(0, 5);
+            const reason = `未在出站白名单：${sample.join("; ")}`;
+            emitDefenseEvent({
+              timestamp: now(),
+              defense: "outbound_trust",
+              result: outboundTrustMode === "enforce" ? "blocked" : "observed",
+              reason,
+              toolName: normalizedToolName,
+              details: { unauthorized: sample, count: blockedUrls.length, trustedCount: trustedList.length },
+              toolParams: normalizedParams,
+              userInput: sessionKey ? state.peekLastUserInput(sessionKey) : void 0
+            });
+            logger.warn(
+              outboundTrustMode === "enforce"
+                ? "claw-aegis: 阻断未授权出站"
+                : "claw-aegis: 观察到未授权出站",
+              {
+                event: outboundTrustMode === "enforce" ? "outbound_trust_blocked" : "outbound_trust_observed",
+                hook: "before_tool_call",
+                sessionKey,
+                runId,
+                toolName: normalizedToolName,
+                mode: outboundTrustMode,
+                hosts: sample
+              }
+            );
+            if (outboundTrustMode === "enforce") {
+              const totalDurationMs = now() - toolGuardStartedAt;
+              logDefenseFinish(logger, {
+                hook: "before_tool_call",
+                mechanism: "tool_call_guard",
+                sessionKey,
+                runId,
+                toolName: normalizedToolName,
+                result: "blocked",
+                durationMs: totalDurationMs,
+                blockedBy: "outbound_trust"
+              });
+              return { block: true, blockReason: reason };
+            }
+          }
+        }
         const hasAnyEnabledStrategy = toolCallDefenseStrategies.some(
           (strategy) => isDefenseEnabled(resolveToolCallDefenseMode(toolCallModes, strategy.modeSource))
         );

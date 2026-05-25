@@ -435,8 +435,13 @@ function postEventToSecplane(record: DefenseEventRecord): void {
   const body = JSON.stringify({ source: "aegis", events: [event] });
 
   // Use globalThis.fetch (Node 22 in the OpenClaw image has native fetch).
+  // 30s timeout: ClawManager's secplane ingest endpoint can take 5–6s per
+  // single event under load (auth lookup + rule re-eval + alert persist).
+  // 3s aborted every legitimate post and the .catch() swallowed it silently,
+  // so alerts disappeared without trace. 30s gives plenty of headroom while
+  // still capping genuinely stuck network calls. Keep in sync with handlers.js.
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 3000);
+  const timer = setTimeout(() => ac.abort(), 30000);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) {
