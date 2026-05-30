@@ -624,6 +624,10 @@ export class ClawAegisState {
     this.turnStates.delete(sessionKey);
     this.sessionSecrets.delete(sessionKey);
     this.sessionPrompts.delete(sessionKey);
+    // 之前漏掉 lastUserInputs，5min TTL 兜底但 sessionKey 复用窗口内会把上一会话
+    // 的最后一条用户输入串进新会话的 defense event.userInput，造成跨会话误归因。
+    // TTL 扫描仍在 cleanupExpiredState 里保留，防 hook 漏调时兜底。
+    this.lastUserInputs.delete(sessionKey);
     for (const [loopKey] of this.loopCounters) {
       if (loopKey.startsWith(`${sessionKey}|`)) {
         this.loopCounters.delete(loopKey);

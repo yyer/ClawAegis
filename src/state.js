@@ -496,6 +496,7 @@ class ClawAegisState {
     this.turnStates.delete(sessionKey);
     this.sessionSecrets.delete(sessionKey);
     this.sessionPrompts.delete(sessionKey);
+    this.lastUserInputs.delete(sessionKey);
     for (const [loopKey] of this.loopCounters) {
       if (loopKey.startsWith(`${sessionKey}|`)) {
         this.loopCounters.delete(loopKey);
