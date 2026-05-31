@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-const CLAW_AEGIS_PLUGIN_ID = "claw-aegis";
+const CLAW_AEGIS_PLUGIN_ID = "clawaegisex";
 const DEFENSE_MODES = ["off", "observe", "enforce"];
 const TURN_STATE_TTL_MS = 5 * 6e4;
 const LOOP_GUARD_TTL_MS = 5 * 6e4;
@@ -24,7 +24,7 @@ const TRUSTED_SKILLS_FILENAME = "trusted-skills.json";
 const SELF_INTEGRITY_FILENAME = "self-integrity.json";
 const DEFENSE_EVENTS_FILENAME = "defense-events.jsonl";
 const SKILL_SCAN_EVENTS_FILENAME = "skill-scan-events.jsonl";
-const BLOCK_REASON_PROTECTED_PATH = "\u5B89\u5168\u9650\u5236\uFF1A\u7981\u6B62\u8BBF\u95EE\u3001\u67E5\u8BE2\u3001\u4FEE\u6539\u3001\u5220\u9664\u3001\u5173\u95ED\u6216\u7ED5\u8FC7\u53D7\u4FDD\u62A4\u7684\u654F\u611F\u8DEF\u5F84\u3001\u914D\u7F6E\u3001\u91CD\u8981 skill \u6216 claw-aegis \u63D2\u4EF6\u76EE\u5F55\u3002";
+const BLOCK_REASON_PROTECTED_PATH = "\u5B89\u5168\u9650\u5236\uFF1A\u7981\u6B62\u8BBF\u95EE\u3001\u67E5\u8BE2\u3001\u4FEE\u6539\u3001\u5220\u9664\u3001\u5173\u95ED\u6216\u7ED5\u8FC7\u53D7\u4FDD\u62A4\u7684\u654F\u611F\u8DEF\u5F84\u3001\u914D\u7F6E\u3001\u91CD\u8981 skill 或 clawaegisex \u63D2\u4EF6\u76EE\u5F55\u3002";
 const BLOCK_REASON_WORKSPACE_DELETE = "\u5B89\u5168\u9650\u5236\uFF1A\u7981\u6B62\u5220\u9664 workspace \u4E4B\u5916\u7684\u8DEF\u5F84\u3002";
 const BLOCK_REASON_OPENCLAW_COMMAND = "\u5B89\u5168\u9650\u5236\uFF1A\u7981\u6B62\u6267\u884C openclaw CLI \u6216\u63A7\u5236\u547D\u4EE4\u3002";
 const BLOCK_REASON_HIGH_RISK_OPERATION = "\u5B89\u5168\u9650\u5236\uFF1A\u5DF2\u963B\u6B62\u672C\u6B21\u9AD8\u98CE\u9669\u64CD\u4F5C\u8BF7\u6C42\u3002";
@@ -130,7 +130,7 @@ const clawAegisPluginConfigSchema = {
 const clawAegisPluginUiHints = {
   allDefensesEnabled: {
     label: "Enable All Defenses",
-    help: "Master switch for every claw-aegis defense below."
+    help: "Master switch for every clawaegisex defense below."
   },
   defaultBlockingMode: {
     label: "Default Blocking Mode",
@@ -237,13 +237,13 @@ const clawAegisPluginUiHints = {
   },
   skillRoots: {
     label: "Additional Skill Roots (Ignored)",
-    help: "Deprecated. claw-aegis v1 now scans only ~/.openclaw/skills and ~/.openclaw/workspace/skills.",
+    help: "Deprecated. clawaegisex v1 now scans only ~/.openclaw/skills and ~/.openclaw/workspace/skills.",
     advanced: true,
     placeholder: "/path/to/skills"
   },
   extraProtectedRoots: {
     label: "Additional Protected Roots",
-    help: "Legacy compatibility alias of protectedPaths. Extra directories that claw-aegis should treat as protected paths.",
+    help: "Legacy compatibility alias of protectedPaths. Extra directories that clawaegisex should treat as protected paths.",
     advanced: true,
     placeholder: "/path/to/protected"
   }
@@ -311,11 +311,11 @@ function userConfigCandidatePaths(rootDir) {
   const out = [];
   const home = os.homedir();
   if (home) {
-    out.push(path.join(home, ".openclaw", "workspace", "skills", "claw-aegis", "user_config.json"));
+    out.push(path.join(home, ".openclaw", "workspace", "skills", "clawaegisex", "user_config.json"));
   }
   if (rootDir) out.push(path.join(rootDir, "user_config.json"));
   if (home) {
-    out.push(path.join(home, ".openclaw", "skills", "claw-aegis", "user_config.json"));
+    out.push(path.join(home, ".openclaw", "skills", "clawaegisex", "user_config.json"));
   }
   return out;
 }

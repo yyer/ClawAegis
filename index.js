@@ -14,7 +14,7 @@ function wrapHookFailOpenSync(api, hookName, handler) {
       return handler(event, ctx);
     } catch (error) {
       api.logger.error(
-        `[claw-aegis] ${hookName} failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
+        `[clawaegisex] ${hookName} failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
       );
       return void 0;
     }
@@ -27,7 +27,7 @@ function wrapHookFailOpenAsync(api, hookName, handler) {
       return await handler(event, ctx);
     } catch (error) {
       api.logger.error(
-        `[claw-aegis] ${hookName} failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
+        `[clawaegisex] ${hookName} failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
       );
       return void 0;
     }
@@ -55,10 +55,10 @@ function registerClawAegisPlugin(api, createRuntime = createClawAegisRuntime) {
     const reload = () => {
       try {
         runtime = createRuntime(api);
-        api.logger.info(`[claw-aegis] hot-reloaded user_config (mtime=${lastMtime})`);
+        api.logger.info(`[clawaegisex] hot-reloaded user_config (mtime=${lastMtime})`);
       } catch (error) {
         api.logger.error(
-          `[claw-aegis] hot-reload failed; keeping previous runtime: ${error instanceof Error ? error.message : String(error)}`
+          `[clawaegisex] hot-reload failed; keeping previous runtime: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     };
@@ -93,14 +93,14 @@ function registerClawAegisPlugin(api, createRuntime = createClawAegisRuntime) {
     api.on("session_end", dispatch("session_end"));
   } catch (error) {
     api.logger.error(
-      `[claw-aegis] register failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
+      `[clawaegisex] register failed; fail-open keeps OpenClaw running: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
 
 var index_default = definePluginEntry({
-  id: "claw-aegis",
-  name: "Claw Aegis",
+  id: "clawaegisex",
+  name: "Claw Aegis Ex",
   description: "Minimal safety guard plugin for prompt, tool, and tool-result hardening.",
   configSchema: clawAegisPluginConfigDefinition,
   register(api) {

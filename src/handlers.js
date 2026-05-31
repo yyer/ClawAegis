@@ -227,19 +227,19 @@ function arePromptHooksEnabled(api) {
   return pluginEntry?.hooks?.allowPromptInjection !== false;
 }
 function logDefenseStart(logger, meta) {
-  logger.info("claw-aegis: \u5F00\u59CB\u6267\u884C\u9632\u5FA1\u68C0\u67E5", {
+  logger.info("clawaegisex: \u5F00\u59CB\u6267\u884C\u9632\u5FA1\u68C0\u67E5", {
     event: "defense_check_started",
     ...meta
   });
 }
 function logDefenseFinish(logger, meta) {
-  logger.info("claw-aegis: \u9632\u5FA1\u68C0\u67E5\u7ED3\u675F", {
+  logger.info("clawaegisex: \u9632\u5FA1\u68C0\u67E5\u7ED3\u675F", {
     event: "defense_check_finished",
     ...meta
   });
 }
 function logDefenseResult(logger, meta, level = "info") {
-  const message = "claw-aegis: \u9632\u5FA1\u68C0\u67E5\u7ED3\u679C";
+  const message = "clawaegisex: \u9632\u5FA1\u68C0\u67E5\u7ED3\u679C";
   const payload = {
     event: "defense_check_result",
     ...meta
@@ -274,14 +274,14 @@ function postEventToSecplane(record) {
   const event = {
     event_id: `aegis-${record.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
     ts: new Date(record.timestamp).toISOString(),
-    hook: "claw-aegis",
+    hook: "clawaegisex",
     defense: record.defense,
     rule_id: record.defense,
     rule_name: record.defense,
     severity: record.result === "blocked" ? "high" : "medium",
     result: record.result,
     reason: record.reason ?? "",
-    subject: record.toolName !== undefined ? `tool.${record.toolName}` : "claw-aegis.event",
+    subject: record.toolName !== undefined ? `tool.${record.toolName}` : "clawaegisex.event",
     evidence: record.commandText ?? record.userInput ?? "",
     raw_payload: JSON.stringify({ details: record.details, toolParams: record.toolParams }).slice(0, 2048)
   };
@@ -358,14 +358,14 @@ function createClawAegisRuntime(api, options) {
       try {
         liveConfig = resolveClawAegisPluginConfig(api);
         liveConfigMtimeMs = mt;
-        logger.info("claw-aegis: user_config.json 已热重载", {
+        logger.info("clawaegisex: user_config.json 已热重载", {
           event: "user_config_hot_reload",
           mtimeMs: mt,
           userRiskScanEnabled: liveConfig.userRiskScanEnabled,
           disabledUserRiskFlags: liveConfig.disabledUserRiskFlags
         });
       } catch (error) {
-        logger.warn("claw-aegis: user_config.json 热重载失败，沿用上次配置", {
+        logger.warn("clawaegisex: user_config.json 热重载失败，沿用上次配置", {
           event: "user_config_hot_reload_failed",
           reason: error instanceof Error ? error.message : String(error)
         });
@@ -392,16 +392,16 @@ function createClawAegisRuntime(api, options) {
     scanService,
     hooks: {
       gateway_start: async () => {
-        logger.info("claw-aegis: \u7F51\u5173\u542F\u52A8", {
+        logger.info("clawaegisex: \u7F51\u5173\u542F\u52A8", {
           event: "gateway_start"
         });
         try {
           await state.loadPersistentState();
-          logger.info("claw-aegis: \u5DF2\u6062\u590D\u6301\u4E45\u5316\u72B6\u6001", {
+          logger.info("clawaegisex: \u5DF2\u6062\u590D\u6301\u4E45\u5316\u72B6\u6001", {
             event: "state_restored"
           });
         } catch (error) {
-          logger.error("claw-aegis: \u6062\u590D\u6301\u4E45\u5316\u72B6\u6001\u5931\u8D25", {
+          logger.error("clawaegisex: \u6062\u590D\u6301\u4E45\u5316\u72B6\u6001\u5931\u8D25", {
             event: "state_restore_failed",
             reason: error instanceof Error ? error.message : String(error)
           });
@@ -409,13 +409,13 @@ function createClawAegisRuntime(api, options) {
         try {
           const protectedRoots = config.selfProtectionEnabled ? await resolveProtectedRoots(api, stateDir) : [];
           state.setProtectedRoots(protectedRoots);
-          logger.info("claw-aegis: \u5DF2\u89E3\u6790\u53D7\u4FDD\u62A4\u8DEF\u5F84", {
+          logger.info("clawaegisex: \u5DF2\u89E3\u6790\u53D7\u4FDD\u62A4\u8DEF\u5F84", {
             event: "protected_roots_ready",
             count: protectedRoots.length,
             enabled: config.selfProtectionEnabled
           });
         } catch (error) {
-          logger.error("claw-aegis: \u89E3\u6790\u53D7\u4FDD\u62A4\u8DEF\u5F84\u5931\u8D25", {
+          logger.error("clawaegisex: \u89E3\u6790\u53D7\u4FDD\u62A4\u8DEF\u5F84\u5931\u8D25", {
             event: "protected_roots_failed",
             reason: error instanceof Error ? error.message : String(error)
           });
@@ -429,11 +429,11 @@ function createClawAegisRuntime(api, options) {
             });
             state.setSelfIntegrityRecord(integrityRecord);
             await state.persistSelfIntegrity();
-            logger.info("claw-aegis: \u5DF2\u5237\u65B0\u81EA\u5B8C\u6574\u6027\u8BB0\u5F55", {
+            logger.info("clawaegisex: \u5DF2\u5237\u65B0\u81EA\u5B8C\u6574\u6027\u8BB0\u5F55", {
               event: "self_integrity_refreshed"
             });
           } catch (error) {
-            logger.error("claw-aegis: \u5237\u65B0\u81EA\u5B8C\u6574\u6027\u8BB0\u5F55\u5931\u8D25", {
+            logger.error("clawaegisex: \u5237\u65B0\u81EA\u5B8C\u6574\u6027\u8BB0\u5F55\u5931\u8D25", {
               event: "self_integrity_failed",
               reason: error instanceof Error ? error.message : String(error)
             });
@@ -441,13 +441,13 @@ function createClawAegisRuntime(api, options) {
         }
         try {
           if (!config.skillScanEnabled) {
-            logger.info("claw-aegis: \u914D\u7F6E\u5DF2\u5173\u95ED skill \u626B\u63CF", {
+            logger.info("clawaegisex: \u914D\u7F6E\u5DF2\u5173\u95ED skill \u626B\u63CF", {
               event: "skill_scan_disabled"
             });
             return;
           }
           if (config.skillRoots.length > 0) {
-            logger.warn("claw-aegis: \u5DF2\u5FFD\u7565\u8FC7\u65F6\u7684 skillRoots \u914D\u7F6E", {
+            logger.warn("clawaegisex: \u5DF2\u5FFD\u7565\u8FC7\u65F6\u7684 skillRoots \u914D\u7F6E", {
               event: "skill_scan_legacy_roots_ignored",
               ignoredCount: config.skillRoots.length
             });
@@ -455,14 +455,14 @@ function createClawAegisRuntime(api, options) {
           scanService.start();
           if (config.startupSkillScan) {
             void scanService.scanRoots({ roots: skillScanRoots, budgetMs: STARTUP_SCAN_BUDGET_MS }).catch((error) => {
-              logger.warn("claw-aegis: \u542F\u52A8\u9636\u6BB5\u7684 skill \u626B\u63CF\u5DF2\u964D\u7EA7", {
+              logger.warn("clawaegisex: \u542F\u52A8\u9636\u6BB5\u7684 skill \u626B\u63CF\u5DF2\u964D\u7EA7", {
                 event: "startup_skill_scan_failed",
                 reason: error instanceof Error ? error.message : String(error)
               });
             });
           }
         } catch (error) {
-          logger.error("claw-aegis: \u542F\u52A8 skill \u626B\u63CF\u670D\u52A1\u5931\u8D25", {
+          logger.error("clawaegisex: \u542F\u52A8 skill \u626B\u63CF\u670D\u52A1\u5931\u8D25", {
             event: "skill_scan_start_failed",
             reason: error instanceof Error ? error.message : String(error)
           });
@@ -537,7 +537,7 @@ function createClawAegisRuntime(api, options) {
           details: { flags: match.flags, enforceFlags, observeFlags },
           userInput: (event.content ?? "").slice(0, 500)
         });
-        logger.warn("claw-aegis: \u68C0\u6D4B\u5230\u7528\u6237\u98CE\u9669\u8BF7\u6C42", {
+        logger.warn("clawaegisex: \u68C0\u6D4B\u5230\u7528\u6237\u98CE\u9669\u8BF7\u6C42", {
           event: "user_risk_detected",
           hook: "message_received",
           sessionKey,
@@ -600,7 +600,7 @@ function createClawAegisRuntime(api, options) {
             reason: `脱敏 ${sanitized.redactionCount} 处敏感内容`,
             details: { redactionCount: sanitized.redactionCount, matchedKeywords: sanitized.matchedKeywords },
           });
-          logger.warn("claw-aegis: \u5DF2\u8131\u654F\u5BF9\u5916\u53D1\u9001\u6D88\u606F\u4E2D\u7684\u654F\u611F\u5185\u5BB9", {
+          logger.warn("clawaegisex: \u5DF2\u8131\u654F\u5BF9\u5916\u53D1\u9001\u6D88\u606F\u4E2D\u7684\u654F\u611F\u5185\u5BB9", {
             event: "outbound_message_redacted",
             hook: "message_sending",
             sessionKey,
@@ -672,7 +672,7 @@ function createClawAegisRuntime(api, options) {
               const riskySkills = [
                 ...new Set(skillReview.riskyAssessments.map((assessment) => assessment.skillId))
               ];
-              logger.warn("claw-aegis: \u5DF2\u5C06\u9AD8\u98CE\u9669 skill \u63D0\u5347\u4E3A\u63D0\u793A\u9632\u62A4", {
+              logger.warn("clawaegisex: \u5DF2\u5C06\u9AD8\u98CE\u9669 skill \u63D0\u5347\u4E3A\u63D0\u793A\u9632\u62A4", {
                 event: "skill_prompt_guard_triggered",
                 hook: "before_prompt_build",
                 sessionKey,
@@ -697,7 +697,7 @@ function createClawAegisRuntime(api, options) {
               }
             }
           } catch (error) {
-            logger.error("claw-aegis: \u672C\u8F6E skill \u98CE\u9669\u590D\u6838\u5931\u8D25", {
+            logger.error("clawaegisex: \u672C\u8F6E skill \u98CE\u9669\u590D\u6838\u5931\u8D25", {
               event: "skill_prompt_guard_failed",
               hook: "before_prompt_build",
               reason: error instanceof Error ? error.message : String(error)
@@ -712,7 +712,7 @@ function createClawAegisRuntime(api, options) {
         ]);
         const durationMs = now() - startedAt;
         if (currentState?.prependNeeded) {
-          logger.info("claw-aegis: \u5DF2\u6CE8\u5165\u63D0\u793A\u9632\u62A4", {
+          logger.info("clawaegisex: \u5DF2\u6CE8\u5165\u63D0\u793A\u9632\u62A4", {
             event: "prompt_safeguards_injected",
             hook: "before_prompt_build",
             sessionKey,
@@ -850,7 +850,7 @@ function createClawAegisRuntime(api, options) {
             toolParams: normalizedParams,
             userInput: sessionKey ? state.peekLastUserInput(sessionKey) : void 0
           });
-          logger.warn("claw-aegis: 应急熔断阻断工具调用", {
+          logger.warn("clawaegisex: 应急熔断阻断工具调用", {
             event: "kill_switch_blocked",
             hook: "before_tool_call",
             sessionKey,
@@ -896,8 +896,8 @@ function createClawAegisRuntime(api, options) {
             });
             logger.warn(
               requireHttpsMode === "enforce"
-                ? "claw-aegis: 阻断明文网络调用"
-                : "claw-aegis: 观察到明文网络调用",
+                ? "clawaegisex: 阻断明文网络调用"
+                : "clawaegisex: 观察到明文网络调用",
               {
                 event: requireHttpsMode === "enforce" ? "require_https_blocked" : "require_https_observed",
                 hook: "before_tool_call",
@@ -959,8 +959,8 @@ function createClawAegisRuntime(api, options) {
             });
             logger.warn(
               outboundTrustMode === "enforce"
-                ? "claw-aegis: 阻断未授权出站"
-                : "claw-aegis: 观察到未授权出站",
+                ? "clawaegisex: 阻断未授权出站"
+                : "clawaegisex: 观察到未授权出站",
               {
                 event: outboundTrustMode === "enforce" ? "outbound_trust_blocked" : "outbound_trust_observed",
                 hook: "before_tool_call",
@@ -1019,7 +1019,7 @@ function createClawAegisRuntime(api, options) {
           normalizedParams,
           baseDir
         );
-        logger.debug?.("claw-aegis: \u5DF2\u89C4\u8303\u5316\u5DE5\u5177\u8C03\u7528", {
+        logger.debug?.("clawaegisex: \u5DF2\u89C4\u8303\u5316\u5DE5\u5177\u8C03\u7528", {
           event: "tool_call_normalized",
           hook: "before_tool_call",
           sessionKey,
@@ -1116,7 +1116,7 @@ function createClawAegisRuntime(api, options) {
               toolParams: normalizedParams,
               userInput: sessionKey ? state.peekLastUserInput(sessionKey) : void 0
             });
-            logger.warn(strategy.blockedMessage ?? "claw-aegis: \u5DF2\u963B\u6B62\u98CE\u9669\u5DE5\u5177\u8C03\u7528", {
+            logger.warn(strategy.blockedMessage ?? "clawaegisex: \u5DF2\u963B\u6B62\u98CE\u9669\u5DE5\u5177\u8C03\u7528", {
               event: "tool_call_blocked",
               hook: "before_tool_call",
               toolName: normalizedToolName,
@@ -1157,7 +1157,7 @@ function createClawAegisRuntime(api, options) {
             logObservedToolCall({
               logger,
               mechanism: strategy.id,
-              message: strategy.observedMessage ?? "claw-aegis: \u89C2\u5BDF\u8005\u6A21\u5F0F\u547D\u4E2D\u98CE\u9669\u5DE5\u5177\u8C03\u7528\uFF0C\u5DF2\u653E\u884C",
+              message: strategy.observedMessage ?? "clawaegisex: \u89C2\u5BDF\u8005\u6A21\u5F0F\u547D\u4E2D\u98CE\u9669\u5DE5\u5177\u8C03\u7528\uFF0C\u5DF2\u653E\u884C",
               sessionKey,
               runId,
               toolName: normalizedToolName,
@@ -1235,7 +1235,7 @@ function createClawAegisRuntime(api, options) {
             if (sessionKey && derivedSignals.runtimeRiskFlags.length > 0) {
               state.noteRuntimeRisk(sessionKey, derivedSignals.runtimeRiskFlags);
             }
-            logger.info("claw-aegis: \u5DF2\u8BB0\u5F55\u672C\u8F6E\u65B0\u4EA7\u751F\u7684\u811A\u672C\u4EA7\u7269", {
+            logger.info("clawaegisex: \u5DF2\u8BB0\u5F55\u672C\u8F6E\u65B0\u4EA7\u751F\u7684\u811A\u672C\u4EA7\u7269", {
               event: "script_artifacts_recorded",
               hook: "after_tool_call",
               sessionKey,
@@ -1250,7 +1250,7 @@ function createClawAegisRuntime(api, options) {
           return;
         }
         const blockedCount = calls.filter((call) => call.blocked).length;
-        logger.info("claw-aegis: \u5DF2\u66F4\u65B0\u540C run \u5DE5\u5177\u8C03\u7528\u94FE", {
+        logger.info("clawaegisex: \u5DF2\u66F4\u65B0\u540C run \u5DE5\u5177\u8C03\u7528\u94FE", {
           event: "tool_call_chain_updated",
           hook: "after_tool_call",
           sessionKey,
@@ -1270,7 +1270,7 @@ function createClawAegisRuntime(api, options) {
           state.clearSessionRuntimeState(sessionKey);
         }
         if (runId || sessionKey) {
-          logger.info("claw-aegis: \u5DF2\u6E05\u7406\u672C\u8F6E\u4E34\u65F6\u5B89\u5168\u72B6\u6001", {
+          logger.info("clawaegisex: \u5DF2\u6E05\u7406\u672C\u8F6E\u4E34\u65F6\u5B89\u5168\u72B6\u6001", {
             event: "agent_runtime_state_cleared",
             hook: "agent_end",
             sessionKey,
@@ -1284,7 +1284,7 @@ function createClawAegisRuntime(api, options) {
           return;
         }
         state.clearSessionRuntimeState(sessionKey);
-        logger.info("claw-aegis: \u5DF2\u6E05\u7406 session \u7EA7\u4E34\u65F6\u5B89\u5168\u72B6\u6001", {
+        logger.info("clawaegisex: \u5DF2\u6E05\u7406 session \u7EA7\u4E34\u65F6\u5B89\u5168\u72B6\u6001", {
           event: "session_runtime_state_cleared",
           hook: "session_end",
           sessionKey
@@ -1329,7 +1329,7 @@ function createClawAegisRuntime(api, options) {
               reason: `脱敏 assistant 输出 ${sanitized.redactionCount} 处`,
               details: { redactionCount: sanitized.redactionCount, matchedKeywords: sanitized.matchedKeywords },
             });
-            logger.warn("claw-aegis: \u5DF2\u8131\u654F assistant \u8F93\u51FA\u4E2D\u7684\u654F\u611F\u5185\u5BB9", {
+            logger.warn("clawaegisex: \u5DF2\u8131\u654F assistant \u8F93\u51FA\u4E2D\u7684\u654F\u611F\u5185\u5BB9", {
               event: "assistant_output_redacted",
               hook: "before_message_write",
               sessionKey,
@@ -1403,7 +1403,7 @@ function createClawAegisRuntime(api, options) {
           const toolName = typeof message.toolName === "string" ? message.toolName : void 0;
           const rawExtracted = thirdPartyWebContent ? collectToolResultScanText(message) : void 0;
           if (thirdPartyWebContent) {
-            logger.info("claw-aegis: \u5F00\u59CB\u5904\u7406\u7B2C\u4E09\u65B9\u7F51\u9875\u5185\u5BB9", {
+            logger.info("clawaegisex: \u5F00\u59CB\u5904\u7406\u7B2C\u4E09\u65B9\u7F51\u9875\u5185\u5BB9", {
               event: "third_party_web_content_processing_started",
               hook: "before_message_write",
               sessionKey,
@@ -1419,7 +1419,7 @@ function createClawAegisRuntime(api, options) {
             state.noteObservedSecrets(sessionKey, observedSecrets);
           }
           if (thirdPartyWebContent || sanitized.externalContent) {
-            logger.info("claw-aegis: \u5B8C\u6210\u5904\u7406\u7B2C\u4E09\u65B9\u7F51\u9875\u5185\u5BB9", {
+            logger.info("clawaegisex: \u5B8C\u6210\u5904\u7406\u7B2C\u4E09\u65B9\u7F51\u9875\u5185\u5BB9", {
               event: "third_party_web_content_processing_finished",
               hook: "before_message_write",
               sessionKey,
@@ -1474,9 +1474,9 @@ function createClawAegisRuntime(api, options) {
               reason: `风险标记: ${outcome.riskFlags.join(", ") || "suspicious/oversize"}`,
               details: { flags: outcome.riskFlags, suspicious: outcome.suspicious, oversize: outcome.oversize },
             });
-            logger.warn("claw-aegis: \u5DF2\u5B8C\u6210\u5DE5\u5177\u7ED3\u679C\u5BA1\u67E5", logMeta);
+            logger.warn("clawaegisex: \u5DF2\u5B8C\u6210\u5DE5\u5177\u7ED3\u679C\u5BA1\u67E5", logMeta);
           } else {
-            logger.debug?.("claw-aegis: \u5DF2\u5B8C\u6210\u5DE5\u5177\u7ED3\u679C\u5BA1\u67E5", logMeta);
+            logger.debug?.("clawaegisex: \u5DF2\u5B8C\u6210\u5DE5\u5177\u7ED3\u679C\u5BA1\u67E5", logMeta);
           }
           logDefenseFinish(logger, {
             hook: "before_message_write",
@@ -1492,7 +1492,7 @@ function createClawAegisRuntime(api, options) {
         } catch (error) {
           state.markToolResultSeen(sessionKey);
           const durationMs = now() - startedAt;
-          logger.error("claw-aegis: \u5DE5\u5177\u7ED3\u679C\u626B\u63CF\u5DF2\u964D\u7EA7", {
+          logger.error("clawaegisex: \u5DE5\u5177\u7ED3\u679C\u626B\u63CF\u5DF2\u964D\u7EA7", {
             event: "tool_result_scan_failed",
             hook: "before_message_write",
             sessionKey,

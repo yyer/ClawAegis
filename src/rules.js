@@ -132,10 +132,10 @@ const APPLY_PATCH_MARKERS = [
   "*** Move to: "
 ];
 const CLAW_AEGIS_REFERENCE_PATTERNS = [
-  /(?:^|[^A-Za-z0-9_-])claw-aegis(?:$|[^A-Za-z0-9_-])/i,
-  /~\/\.openclaw\/extensions\/claw-aegis/i,
-  /\bplugins\.entries\.(?:\[["']claw-aegis["']\]|claw-aegis)\b/i,
-  /(?:安全插件|安全扩展).{0,24}claw-aegis/i
+  /(?:^|[^A-Za-z0-9_-])clawaegisex(?:$|[^A-Za-z0-9_-])/i,
+  /~\/\.openclaw\/extensions\/clawaegisex/i,
+  /\bplugins\.entries\.(?:\[["']clawaegisex["']\]|clawaegisex)\b/i,
+  /(?:安全插件|安全扩展).{0,24}clawaegisex/i
 ];
 const CLAW_AEGIS_QUERY_ACTION_PATTERNS = [
   /\b(?:inspect|read|view|show|display|print|cat|less|more|head|tail|list|ls|tree|find|search|query|grep|rg|ripgrep|locate|whereis|get)\b/i,
@@ -162,8 +162,8 @@ const CLAW_AEGIS_DISABLE_ACTION_COMPACT_PATTERNS = [
   /(?:禁用|忽略|绕过|关闭|停用|停止|卸载|移除)/i
 ];
 const CLAW_AEGIS_CONFIG_TAMPER_PATTERNS = [
-  /\bplugins\.entries\.(?:\[["']claw-aegis["']\]|claw-aegis)\b/i,
-  /["']claw-aegis["']\s*:\s*\{/i
+  /\bplugins\.entries\.(?:\[["']clawaegisex["']\]|clawaegisex)\b/i,
+  /["']clawaegisex["']\s*:\s*\{/i
 ];
 const CLAW_AEGIS_CONFIG_TAMPER_COMPACT_PATTERNS = [/pluginsentriesclawaegis/i];
 const CLAW_AEGIS_CONFIG_DISABLE_PATTERNS = [
@@ -180,7 +180,7 @@ const SENSITIVE_PROTECTED_PATH_PATTERNS = [
   /(?:^|\/)\.ssh(?:\/|$)/i,
   /(?:^|\/)\.antconfig(?:\/|$)/i,
   /(?:^|\/)\.openclaw\/openclaw\.json(?:$|[/*?])/i,
-  /(?:^|\/)\.openclaw\/extensions\/claw-aegis(?:\/|$|[/*?])/i,
+  /(?:^|\/)\.openclaw\/extensions\/clawaegisex(?:\/|$|[/*?])/i,
   // shell 配置文件（防止重定向截断攻击）
   /(?:^|\/)\.(?:bashrc|zshrc|bash_profile|zprofile|profile|bash_login|zshenv)(?:$|[/*?])/i
 ];
@@ -190,7 +190,7 @@ const SENSITIVE_PATH_TEXT_PATTERNS = [
   /\/\.openclaw\/openclaw\.json(?:[^a-z0-9_]|$)/i,
   // ~/ 前缀形式（expandHomeLike 只处理字符串开头，整句文本中的 ~ 不会展开）
   /~\/\.openclaw\/openclaw\.json(?:[^a-z0-9_]|$)/i,
-  /\/\.openclaw\/extensions\/claw-aegis(?:[^a-z0-9_-]|$)/i,
+  /\/\.openclaw\/extensions\/clawaegisex(?:[^a-z0-9_-]|$)/i,
   // .openclaw/agents/ 目录（含 models.json 等 agent 配置）
   /\/\.openclaw\/agents\//i,
   /(?:^|[^a-z0-9_])\.openclaw\/agents(?:[^a-z0-9_-]|$)/i,

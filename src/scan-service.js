@@ -60,19 +60,19 @@ class SkillScanService {
     return Boolean(this.cooldownUntil && this.cooldownUntil > now);
   }
   logSkillScanStart(meta) {
-    this.params.logger.info("claw-aegis: \u5F00\u59CB\u6267\u884C skill \u626B\u63CF", {
+    this.params.logger.info("clawaegisex: \u5F00\u59CB\u6267\u884C skill \u626B\u63CF", {
       event: "skill_scan_started",
       ...meta
     });
   }
   logSkillScanFinish(meta) {
-    this.params.logger.info("claw-aegis: skill \u626B\u63CF\u7ED3\u675F", {
+    this.params.logger.info("clawaegisex: skill \u626B\u63CF\u7ED3\u675F", {
       event: "skill_scan_finished",
       ...meta
     });
   }
   logSkillScanResult(meta, level = "info") {
-    const message = "claw-aegis: skill \u626B\u63CF\u7ED3\u679C";
+    const message = "clawaegisex: skill \u626B\u63CF\u7ED3\u679C";
     const payload = {
       event: "skill_scan_result",
       ...meta
@@ -115,7 +115,7 @@ class SkillScanService {
       return;
     }
     this.workerSupported = false;
-    this.params.logger.warn("claw-aegis: \u5DF2\u56DE\u9000\u5230\u5185\u8054 skill \u626B\u63CF", {
+    this.params.logger.warn("clawaegisex: \u5DF2\u56DE\u9000\u5230\u5185\u8054 skill \u626B\u63CF", {
       event: "skill_worker_fallback",
       reason
     });
@@ -163,7 +163,7 @@ class SkillScanService {
       this.cooldownUntil = now + SKILL_SCAN_COOLDOWN_MS;
     }
     this.syncWorkerHealth();
-    this.params.logger.warn("claw-aegis: skill \u626B\u63CF\u5DF2\u964D\u7EA7", {
+    this.params.logger.warn("clawaegisex: skill \u626B\u63CF\u5DF2\u964D\u7EA7", {
       event: "skill_scan_failure",
       reason: error instanceof Error ? error.message : String(error),
       crashCount: this.failureTimestamps.length,
@@ -183,7 +183,7 @@ class SkillScanService {
     this.stopped = false;
     this.clearCooldownIfElapsed();
     this.syncWorkerHealth();
-    this.params.logger.info("claw-aegis: skill \u626B\u63CF\u670D\u52A1\u5DF2\u5C31\u7EEA", {
+    this.params.logger.info("clawaegisex: skill \u626B\u63CF\u670D\u52A1\u5DF2\u5C31\u7EEA", {
       event: "skill_scan_service_ready"
     });
   }
@@ -295,7 +295,7 @@ class SkillScanService {
         this.clearCooldownIfElapsed();
         if (this.isCooldownActive()) {
           skippedCooldownCount += 1;
-          this.params.logger.warn("claw-aegis: \u51B7\u5374\u671F\u95F4\u5DF2\u8DF3\u8FC7\u672C\u8F6E skill \u626B\u63CF", {
+          this.params.logger.warn("clawaegisex: \u51B7\u5374\u671F\u95F4\u5DF2\u8DF3\u8FC7\u672C\u8F6E skill \u626B\u63CF", {
             event: "skill_scan_skipped",
             phase: "turn_review",
             state: "cooldown",
@@ -337,7 +337,7 @@ class SkillScanService {
         await this.params.state.persistTrustedSkills();
       } catch (error) {
         hadErrors = true;
-        this.params.logger.error("claw-aegis: \u6301\u4E45\u5316 trusted skill \u7F13\u5B58\u5931\u8D25", {
+        this.params.logger.error("clawaegisex: \u6301\u4E45\u5316 trusted skill \u7F13\u5B58\u5931\u8D25", {
           event: "skill_scan_persist_failed",
           phase: "turn_review",
           reason: error instanceof Error ? error.message : String(error)
@@ -347,7 +347,7 @@ class SkillScanService {
     const durationMs = this.now() - startedAt;
     const result = riskyAssessments.length > 0 ? "risk_detected" : hadErrors ? "completed_with_errors" : skippedCooldownCount > 0 ? "completed_with_cooldown" : "clear";
     if (riskyAssessments.length > 0) {
-      this.params.logger.warn("claw-aegis: \u68C0\u6D4B\u5230\u9AD8\u98CE\u9669 skill", {
+      this.params.logger.warn("clawaegisex: \u68C0\u6D4B\u5230\u9AD8\u98CE\u9669 skill", {
         event: "skill_risk_detected",
         phase: "turn_review",
         riskySkillCount: riskyAssessments.length,
@@ -428,7 +428,7 @@ class SkillScanService {
     this.clearCooldownIfElapsed();
     if (this.isCooldownActive()) {
       const durationMs2 = this.now() - startedAt;
-      this.params.logger.warn("claw-aegis: \u51B7\u5374\u671F\u95F4\u5DF2\u8DF3\u8FC7 skill \u626B\u63CF", {
+      this.params.logger.warn("clawaegisex: \u51B7\u5374\u671F\u95F4\u5DF2\u8DF3\u8FC7 skill \u626B\u63CF", {
         event: "skill_scan_skipped",
         state: "cooldown",
         path: filePath,
@@ -551,7 +551,7 @@ class SkillScanService {
     }
     if (this.queue.length >= SKILL_SCAN_QUEUE_MAX) {
       const durationMs2 = this.now() - startedAt;
-      this.params.logger.warn("claw-aegis: \u7531\u4E8E\u80CC\u538B\u5DF2\u8DF3\u8FC7 skill \u626B\u63CF", {
+      this.params.logger.warn("clawaegisex: \u7531\u4E8E\u80CC\u538B\u5DF2\u8DF3\u8FC7 skill \u626B\u63CF", {
         event: "skill_scan_backpressure",
         path: filePath,
         state: "scanSkippedDueToBackpressure",
@@ -653,7 +653,7 @@ class SkillScanService {
       if (assessment.trusted) {
         await this.params.state.persistTrustedSkills();
       }
-      this.params.logger.debug?.("claw-aegis: \u5DF2\u5B8C\u6210 skill \u626B\u63CF", {
+      this.params.logger.debug?.("clawaegisex: \u5DF2\u5B8C\u6210 skill \u626B\u63CF", {
         event: "skill_scan_complete",
         path: next.path,
         trusted: result.trusted,
@@ -827,7 +827,7 @@ class SkillScanService {
         }
       });
       this.worker = worker;
-      this.params.logger.info("claw-aegis: skill worker \u5DF2\u542F\u52A8", {
+      this.params.logger.info("clawaegisex: skill worker \u5DF2\u542F\u52A8", {
         event: "skill_worker_started"
       });
       return worker;

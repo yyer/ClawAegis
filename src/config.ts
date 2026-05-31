@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import type { OpenClawPluginApi, OpenClawPluginConfigSchema } from "../runtime-api.js";
 
-export const CLAW_AEGIS_PLUGIN_ID = "claw-aegis";
+export const CLAW_AEGIS_PLUGIN_ID = "clawaegisex";
 export const DEFENSE_MODES = ["off", "observe", "enforce"] as const;
 
 export const TURN_STATE_TTL_MS = 5 * 60_000;
@@ -32,7 +32,7 @@ export const DEFENSE_EVENTS_FILENAME = "defense-events.jsonl";
 export const SKILL_SCAN_EVENTS_FILENAME = "skill-scan-events.jsonl";
 
 export const BLOCK_REASON_PROTECTED_PATH =
-  "安全限制：禁止访问、查询、修改、删除、关闭或绕过受保护的敏感路径、配置、重要 skill 或 claw-aegis 插件目录。";
+  "安全限制：禁止访问、查询、修改、删除、关闭或绕过受保护的敏感路径、配置、重要 skill 或 clawaegisex 插件目录。";
 export const BLOCK_REASON_WORKSPACE_DELETE =
   "安全限制：禁止删除 workspace 之外的路径。";
 export const BLOCK_REASON_OPENCLAW_COMMAND =
@@ -185,7 +185,7 @@ export const clawAegisPluginConfigSchema = {
 export const clawAegisPluginUiHints = {
   allDefensesEnabled: {
     label: "Enable All Defenses",
-    help: "Master switch for every claw-aegis defense below.",
+    help: "Master switch for every clawaegisex defense below.",
   },
   defaultBlockingMode: {
     label: "Default Blocking Mode",
@@ -304,13 +304,13 @@ export const clawAegisPluginUiHints = {
   },
   skillRoots: {
     label: "Additional Skill Roots (Ignored)",
-    help: "Deprecated. claw-aegis v1 now scans only ~/.openclaw/skills and ~/.openclaw/workspace/skills.",
+    help: "Deprecated. clawaegisex v1 now scans only ~/.openclaw/skills and ~/.openclaw/workspace/skills.",
     advanced: true,
     placeholder: "/path/to/skills",
   },
   extraProtectedRoots: {
     label: "Additional Protected Roots",
-    help: "Legacy compatibility alias of protectedPaths. Extra directories that claw-aegis should treat as protected paths.",
+    help: "Legacy compatibility alias of protectedPaths. Extra directories that clawaegisex should treat as protected paths.",
     advanced: true,
     placeholder: "/path/to/protected",
   },
@@ -439,24 +439,24 @@ function readDefenseMode(
 //   -> ClawAegis reads it on the next hook event (mtime-watched reload).
 //
 // Priority order (first existing wins):
-//   1. ~/.openclaw/workspace/skills/claw-aegis/user_config.json
+//   1. ~/.openclaw/workspace/skills/clawaegisex/user_config.json
 //        — this is where `install_skill` extracts the dispatched bundle.
 //          Putting it first means ClawManager dispatches are authoritative.
 //   2. <rootDir>/user_config.json
 //        — developer-local override next to the loaded plugin source.
 //          Useful for poking at config during local development without
 //          touching the secplane pipeline.
-//   3. ~/.openclaw/skills/claw-aegis/user_config.json
+//   3. ~/.openclaw/skills/clawaegisex/user_config.json
 //        — legacy install location, kept for compatibility.
 export function userConfigCandidatePaths(rootDir: string | undefined): string[] {
   const out: string[] = [];
   const home = os.homedir();
   if (home) {
-    out.push(path.join(home, ".openclaw", "workspace", "skills", "claw-aegis", "user_config.json"));
+    out.push(path.join(home, ".openclaw", "workspace", "skills", "clawaegisex", "user_config.json"));
   }
   if (rootDir) out.push(path.join(rootDir, "user_config.json"));
   if (home) {
-    out.push(path.join(home, ".openclaw", "skills", "claw-aegis", "user_config.json"));
+    out.push(path.join(home, ".openclaw", "skills", "clawaegisex", "user_config.json"));
   }
   return out;
 }

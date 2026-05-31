@@ -330,14 +330,14 @@ type DefenseLogMeta = {
 };
 
 function logDefenseStart(logger: AegisLogger, meta: DefenseLogMeta): void {
-  logger.info("claw-aegis: 开始执行防御检查", {
+  logger.info("clawaegisex: 开始执行防御检查", {
     event: "defense_check_started",
     ...meta,
   });
 }
 
 function logDefenseFinish(logger: AegisLogger, meta: DefenseLogMeta): void {
-  logger.info("claw-aegis: 防御检查结束", {
+  logger.info("clawaegisex: 防御检查结束", {
     event: "defense_check_finished",
     ...meta,
   });
@@ -348,7 +348,7 @@ function logDefenseResult(
   meta: DefenseLogMeta,
   level: "info" | "warn" = "info",
 ): void {
-  const message = "claw-aegis: 防御检查结果";
+  const message = "clawaegisex: 防御检查结果";
   const payload = {
     event: "defense_check_result",
     ...meta,
@@ -413,7 +413,7 @@ function postEventToSecplane(record: DefenseEventRecord): void {
   const event = {
     event_id: `aegis-${record.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
     ts: new Date(record.timestamp).toISOString(),
-    hook: "claw-aegis",
+    hook: "clawaegisex",
     defense: record.defense,
     rule_id: record.defense,
     rule_name: record.defense,
@@ -423,7 +423,7 @@ function postEventToSecplane(record: DefenseEventRecord): void {
     subject:
       record.toolName !== undefined
         ? `tool.${record.toolName}`
-        : "claw-aegis.event",
+        : "clawaegisex.event",
     evidence: record.commandText ?? record.userInput ?? "",
     raw_payload: JSON.stringify({
       details: record.details,
@@ -556,14 +556,14 @@ export function createClawAegisRuntime(
       try {
         liveConfig = resolveClawAegisPluginConfig(api);
         liveConfigMtimeMs = mt;
-        logger.info("claw-aegis: user_config.json 已热重载", {
+        logger.info("clawaegisex: user_config.json 已热重载", {
           event: "user_config_hot_reload",
           mtimeMs: mt,
           userRiskScanEnabled: liveConfig.userRiskScanEnabled,
           disabledUserRiskFlags: liveConfig.disabledUserRiskFlags,
         });
       } catch (error) {
-        logger.warn("claw-aegis: user_config.json 热重载失败，沿用上次配置", {
+        logger.warn("clawaegisex: user_config.json 热重载失败，沿用上次配置", {
           event: "user_config_hot_reload_failed",
           reason: error instanceof Error ? error.message : String(error),
         });
@@ -599,17 +599,17 @@ export function createClawAegisRuntime(
     scanService,
     hooks: {
       gateway_start: async () => {
-        logger.info("claw-aegis: 网关启动", {
+        logger.info("clawaegisex: 网关启动", {
           event: "gateway_start",
         });
 
         try {
           await state.loadPersistentState();
-          logger.info("claw-aegis: 已恢复持久化状态", {
+          logger.info("clawaegisex: 已恢复持久化状态", {
             event: "state_restored",
           });
         } catch (error) {
-          logger.error("claw-aegis: 恢复持久化状态失败", {
+          logger.error("clawaegisex: 恢复持久化状态失败", {
             event: "state_restore_failed",
             reason: error instanceof Error ? error.message : String(error),
           });
@@ -620,13 +620,13 @@ export function createClawAegisRuntime(
             ? await resolveProtectedRoots(api, stateDir)
             : [];
           state.setProtectedRoots(protectedRoots);
-          logger.info("claw-aegis: 已解析受保护路径", {
+          logger.info("clawaegisex: 已解析受保护路径", {
             event: "protected_roots_ready",
             count: protectedRoots.length,
             enabled: config.selfProtectionEnabled,
           });
         } catch (error) {
-          logger.error("claw-aegis: 解析受保护路径失败", {
+          logger.error("clawaegisex: 解析受保护路径失败", {
             event: "protected_roots_failed",
             reason: error instanceof Error ? error.message : String(error),
           });
@@ -641,11 +641,11 @@ export function createClawAegisRuntime(
             });
             state.setSelfIntegrityRecord(integrityRecord);
             await state.persistSelfIntegrity();
-            logger.info("claw-aegis: 已刷新自完整性记录", {
+            logger.info("clawaegisex: 已刷新自完整性记录", {
               event: "self_integrity_refreshed",
             });
           } catch (error) {
-            logger.error("claw-aegis: 刷新自完整性记录失败", {
+            logger.error("clawaegisex: 刷新自完整性记录失败", {
               event: "self_integrity_failed",
               reason: error instanceof Error ? error.message : String(error),
             });
@@ -654,13 +654,13 @@ export function createClawAegisRuntime(
 
         try {
           if (!config.skillScanEnabled) {
-            logger.info("claw-aegis: 配置已关闭 skill 扫描", {
+            logger.info("clawaegisex: 配置已关闭 skill 扫描", {
               event: "skill_scan_disabled",
             });
             return;
           }
           if (config.skillRoots.length > 0) {
-            logger.warn("claw-aegis: 已忽略过时的 skillRoots 配置", {
+            logger.warn("clawaegisex: 已忽略过时的 skillRoots 配置", {
               event: "skill_scan_legacy_roots_ignored",
               ignoredCount: config.skillRoots.length,
             });
@@ -670,14 +670,14 @@ export function createClawAegisRuntime(
             void scanService
               .scanRoots({ roots: skillScanRoots, budgetMs: STARTUP_SCAN_BUDGET_MS })
               .catch((error) => {
-                logger.warn("claw-aegis: 启动阶段的 skill 扫描已降级", {
+                logger.warn("clawaegisex: 启动阶段的 skill 扫描已降级", {
                   event: "startup_skill_scan_failed",
                   reason: error instanceof Error ? error.message : String(error),
                 });
               });
           }
         } catch (error) {
-          logger.error("claw-aegis: 启动 skill 扫描服务失败", {
+          logger.error("clawaegisex: 启动 skill 扫描服务失败", {
             event: "skill_scan_start_failed",
             reason: error instanceof Error ? error.message : String(error),
           });
@@ -773,7 +773,7 @@ export function createClawAegisRuntime(
           },
           userInput: (event.content ?? "").slice(0, 500),
         });
-        logger.warn("claw-aegis: 检测到用户风险请求", {
+        logger.warn("clawaegisex: 检测到用户风险请求", {
           event: "user_risk_detected",
           hook: "message_received",
           sessionKey,
@@ -841,7 +841,7 @@ export function createClawAegisRuntime(
             reason: `脱敏 ${sanitized.redactionCount} 处敏感内容`,
             details: { redactionCount: sanitized.redactionCount, matchedKeywords: sanitized.matchedKeywords },
           });
-          logger.warn("claw-aegis: 已脱敏对外发送消息中的敏感内容", {
+          logger.warn("clawaegisex: 已脱敏对外发送消息中的敏感内容", {
             event: "outbound_message_redacted",
             hook: "message_sending",
             sessionKey,
@@ -919,7 +919,7 @@ export function createClawAegisRuntime(
               const riskySkills = [
                 ...new Set(skillReview.riskyAssessments.map((assessment) => assessment.skillId)),
               ];
-              logger.warn("claw-aegis: 已将高风险 skill 提升为提示防护", {
+              logger.warn("clawaegisex: 已将高风险 skill 提升为提示防护", {
                 event: "skill_prompt_guard_triggered",
                 hook: "before_prompt_build",
                 sessionKey,
@@ -944,7 +944,7 @@ export function createClawAegisRuntime(
               }
             }
           } catch (error) {
-            logger.error("claw-aegis: 本轮 skill 风险复核失败", {
+            logger.error("clawaegisex: 本轮 skill 风险复核失败", {
               event: "skill_prompt_guard_failed",
               hook: "before_prompt_build",
               reason: error instanceof Error ? error.message : String(error),
@@ -959,7 +959,7 @@ export function createClawAegisRuntime(
         ]);
         const durationMs = now() - startedAt;
         if (currentState?.prependNeeded) {
-          logger.info("claw-aegis: 已注入提示防护", {
+          logger.info("clawaegisex: 已注入提示防护", {
             event: "prompt_safeguards_injected",
             hook: "before_prompt_build",
             sessionKey,
@@ -1122,7 +1122,7 @@ export function createClawAegisRuntime(
         });
 
         if (config.dispatchGuardMode === "enforce") {
-          logger.warn("claw-aegis: before_dispatch 已拦截危险操作请求", {
+          logger.warn("clawaegisex: before_dispatch 已拦截危险操作请求", {
             event: "dispatch_guard_blocked",
             hook: "before_dispatch",
             sessionKey,
@@ -1138,11 +1138,11 @@ export function createClawAegisRuntime(
           });
           return {
             handled: true,
-            text: `[ClawAegis] ${reason}\n\n所有破坏性操作必须通过标准 tool call 执行，不能绕过安全 hook。如确需执行，请联系管理员调整安全策略。`,
+            text: `[ClawAegisEx] ${reason}\n\n所有破坏性操作必须通过标准 tool call 执行，不能绕过安全 hook。如确需执行，请联系管理员调整安全策略。`,
           };
         }
 
-        logger.info("claw-aegis: before_dispatch 已观测到危险操作请求（observe 模式）", {
+        logger.info("clawaegisex: before_dispatch 已观测到危险操作请求（observe 模式）", {
           event: "dispatch_guard_observed",
           hook: "before_dispatch",
           sessionKey,
@@ -1223,7 +1223,7 @@ export function createClawAegisRuntime(
         });
 
         if (config.dispatchGuardMode === "enforce") {
-          logger.warn("claw-aegis: before_agent_reply 已拦截危险操作请求", {
+          logger.warn("clawaegisex: before_agent_reply 已拦截危险操作请求", {
             event: "dispatch_guard_blocked",
             hook: "before_agent_reply",
             sessionKey,
@@ -1240,13 +1240,13 @@ export function createClawAegisRuntime(
           return {
             handled: true,
             reply: {
-              text: `[ClawAegis] ${reason}\n\n所有破坏性操作必须通过标准 tool call 执行，不能绕过安全 hook。如确需执行，请联系管理员调整安全策略。`,
+              text: `[ClawAegisEx] ${reason}\n\n所有破坏性操作必须通过标准 tool call 执行，不能绕过安全 hook。如确需执行，请联系管理员调整安全策略。`,
             },
             reason: "dispatch_guard",
           };
         }
 
-        logger.info("claw-aegis: before_agent_reply 已观测到危险操作请求（observe 模式）", {
+        logger.info("clawaegisex: before_agent_reply 已观测到危险操作请求（observe 模式）", {
           event: "dispatch_guard_observed",
           hook: "before_agent_reply",
           sessionKey,
@@ -1332,7 +1332,7 @@ export function createClawAegisRuntime(
           baseDir,
         );
 
-        logger.debug?.("claw-aegis: 已规范化工具调用", {
+        logger.debug?.("clawaegisex: 已规范化工具调用", {
           event: "tool_call_normalized",
           hook: "before_tool_call",
           sessionKey,
@@ -1437,7 +1437,7 @@ export function createClawAegisRuntime(
               toolParams: normalizedParams,
               userInput: sessionKey ? state.peekLastUserInput(sessionKey) : undefined,
             });
-            logger.warn(strategy.blockedMessage ?? "claw-aegis: 已阻止风险工具调用", {
+            logger.warn(strategy.blockedMessage ?? "clawaegisex: 已阻止风险工具调用", {
               event: "tool_call_blocked",
               hook: "before_tool_call",
               toolName: normalizedToolName,
@@ -1479,7 +1479,7 @@ export function createClawAegisRuntime(
             logObservedToolCall({
               logger,
               mechanism: strategy.id,
-              message: strategy.observedMessage ?? "claw-aegis: 观察者模式命中风险工具调用，已放行",
+              message: strategy.observedMessage ?? "clawaegisex: 观察者模式命中风险工具调用，已放行",
               sessionKey,
               runId,
               toolName: normalizedToolName,
@@ -1567,7 +1567,7 @@ export function createClawAegisRuntime(
             if (sessionKey && derivedSignals.runtimeRiskFlags.length > 0) {
               state.noteRuntimeRisk(sessionKey, derivedSignals.runtimeRiskFlags);
             }
-            logger.info("claw-aegis: 已记录本轮新产生的脚本产物", {
+            logger.info("clawaegisex: 已记录本轮新产生的脚本产物", {
               event: "script_artifacts_recorded",
               hook: "after_tool_call",
               sessionKey,
@@ -1582,7 +1582,7 @@ export function createClawAegisRuntime(
           return;
         }
         const blockedCount = calls.filter((call) => call.blocked).length;
-        logger.info("claw-aegis: 已更新同 run 工具调用链", {
+        logger.info("clawaegisex: 已更新同 run 工具调用链", {
           event: "tool_call_chain_updated",
           hook: "after_tool_call",
           sessionKey,
@@ -1607,7 +1607,7 @@ export function createClawAegisRuntime(
         for (const text of event.assistantTexts) {
           if (!text.includes(AEGIS_REFUSAL_PREFIX)) continue;
 
-          // Extract refusal reason: text after "[ClawAegis]" on the same line
+          // Extract refusal reason: text after "[ClawAegisEx]" on the same line
           const idx = text.indexOf(AEGIS_REFUSAL_PREFIX);
           const afterPrefix = text
             .slice(idx + AEGIS_REFUSAL_PREFIX.length)
@@ -1626,7 +1626,7 @@ export function createClawAegisRuntime(
               provider: event.provider,
             },
           });
-          logger.info("claw-aegis: LLM 输出包含 Aegis 拒绝标记", {
+          logger.info("clawaegisex: LLM 输出包含 Aegis 拒绝标记", {
             event: "prompt_self_block_detected",
             hook: "llm_output",
             model: event.model,
@@ -1655,7 +1655,7 @@ export function createClawAegisRuntime(
           state.clearSessionRuntimeState(sessionKey);
         }
         if (runId || sessionKey) {
-          logger.info("claw-aegis: 已清理本轮临时安全状态", {
+          logger.info("clawaegisex: 已清理本轮临时安全状态", {
             event: "agent_runtime_state_cleared",
             hook: "agent_end",
             sessionKey,
@@ -1675,7 +1675,7 @@ export function createClawAegisRuntime(
           return;
         }
         state.clearSessionRuntimeState(sessionKey);
-        logger.info("claw-aegis: 已清理 session 级临时安全状态", {
+        logger.info("clawaegisex: 已清理 session 级临时安全状态", {
           event: "session_runtime_state_cleared",
           hook: "session_end",
           sessionKey,
@@ -1726,7 +1726,7 @@ export function createClawAegisRuntime(
               reason: `脱敏 assistant 输出 ${sanitized.redactionCount} 处`,
               details: { redactionCount: sanitized.redactionCount, matchedKeywords: sanitized.matchedKeywords },
             });
-            logger.warn("claw-aegis: 已脱敏 assistant 输出中的敏感内容", {
+            logger.warn("clawaegisex: 已脱敏 assistant 输出中的敏感内容", {
               event: "assistant_output_redacted",
               hook: "before_message_write",
               sessionKey,
@@ -1805,7 +1805,7 @@ export function createClawAegisRuntime(
             ? collectToolResultScanText(message as never)
             : undefined;
           if (thirdPartyWebContent) {
-            logger.info("claw-aegis: 开始处理第三方网页内容", {
+            logger.info("clawaegisex: 开始处理第三方网页内容", {
               event: "third_party_web_content_processing_started",
               hook: "before_message_write",
               sessionKey,
@@ -1821,7 +1821,7 @@ export function createClawAegisRuntime(
             state.noteObservedSecrets(sessionKey, observedSecrets);
           }
           if (thirdPartyWebContent || sanitized.externalContent) {
-            logger.info("claw-aegis: 完成处理第三方网页内容", {
+            logger.info("clawaegisex: 完成处理第三方网页内容", {
               event: "third_party_web_content_processing_finished",
               hook: "before_message_write",
               sessionKey,
@@ -1885,9 +1885,9 @@ export function createClawAegisRuntime(
               reason: `风险标记: ${outcome.riskFlags.join(", ") || "suspicious/oversize"}`,
               details: { flags: outcome.riskFlags, suspicious: outcome.suspicious, oversize: outcome.oversize },
             });
-            logger.warn("claw-aegis: 已完成工具结果审查", logMeta);
+            logger.warn("clawaegisex: 已完成工具结果审查", logMeta);
           } else {
-            logger.debug?.("claw-aegis: 已完成工具结果审查", logMeta);
+            logger.debug?.("clawaegisex: 已完成工具结果审查", logMeta);
           }
           logDefenseFinish(logger, {
             hook: "before_message_write",
@@ -1909,7 +1909,7 @@ export function createClawAegisRuntime(
         } catch (error) {
           state.markToolResultSeen(sessionKey);
           const durationMs = now() - startedAt;
-          logger.error("claw-aegis: 工具结果扫描已降级", {
+          logger.error("clawaegisex: 工具结果扫描已降级", {
             event: "tool_result_scan_failed",
             hook: "before_message_write",
             sessionKey,

@@ -24,7 +24,7 @@ function wrapHookFailOpenSync(
       return handler(event, ctx);
     } catch (error) {
       api.logger.error(
-        `[claw-aegis] ${hookName} failed; fail-open keeps OpenClaw running: ${
+        `[clawaegisex] ${hookName} failed; fail-open keeps OpenClaw running: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -43,7 +43,7 @@ function wrapHookFailOpenAsync(
       return await handler(event, ctx);
     } catch (error) {
       api.logger.error(
-        `[claw-aegis] ${hookName} failed; fail-open keeps OpenClaw running: ${
+        `[clawaegisex] ${hookName} failed; fail-open keeps OpenClaw running: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -66,7 +66,7 @@ const HOT_RELOAD_POLL_MS = 1000;
 
 // Returns the highest mtime across the candidate user_config.json paths so a
 // secplane-pushed override is picked up regardless of which directory it
-// landed in (rootDir vs ~/.openclaw/workspace/skills/claw-aegis/...).
+// landed in (rootDir vs ~/.openclaw/workspace/skills/clawaegisex/...).
 function snapshotConfigMtime(rootDir: string | undefined): number {
   const target = findUserConfigPath(rootDir);
   if (!target) return 0;
@@ -94,11 +94,11 @@ export function registerClawAegisPlugin(
         const next = createRuntime(api);
         runtime = next;
         api.logger.info(
-          `[claw-aegis] hot-reloaded user_config (mtime=${lastMtime})`,
+          `[clawaegisex] hot-reloaded user_config (mtime=${lastMtime})`,
         );
       } catch (error) {
         api.logger.error(
-          `[claw-aegis] hot-reload failed; keeping previous runtime: ${
+          `[clawaegisex] hot-reload failed; keeping previous runtime: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -144,7 +144,7 @@ export function registerClawAegisPlugin(
     api.on("session_end", dispatch("session_end"));
   } catch (error) {
     api.logger.error(
-      `[claw-aegis] register failed; fail-open keeps OpenClaw running: ${
+      `[clawaegisex] register failed; fail-open keeps OpenClaw running: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -152,8 +152,8 @@ export function registerClawAegisPlugin(
 }
 
 export default definePluginEntry({
-  id: "claw-aegis",
-  name: "Claw Aegis",
+  id: "clawaegisex",
+  name: "Claw Aegis Ex",
   description: "Minimal safety guard plugin for prompt, tool, and tool-result hardening.",
   configSchema: clawAegisPluginConfigDefinition,
   register(api: OpenClawPluginApi) {
