@@ -345,6 +345,39 @@ function normalizeStringList(value: unknown, resolvePath: (input: string) => str
   return results;
 }
 
+// openclaw 2026.5.4 wraps the plugin api in a guarded proxy
+// (createGuardedPluginRegistrationApi) that closes after register() returns.
+// Post-register, any function on `api` — including `api.resolvePath` — returns
+// undefined. ClawAegis calls resolveClawAegisPluginConfig both during register
+// (api.resolvePath works) and from gateway_start/hot-reload (api.resolvePath
+// returns undefined). makeResolvePath falls back to a local resolver that
+// mirrors resolvePluginPath semantics (absolute/~ stays as-is, relative
+// resolves against api.rootDir) so config parsing works in both phases.
+function makeResolvePath(api: OpenClawPluginApi): (input: string) => string {
+  const rootDir = api.rootDir;
+  return (input: string): string => {
+    const apiResolve = api.resolvePath;
+    if (typeof apiResolve === "function") {
+      try {
+        const result = apiResolve(input);
+        if (typeof result === "string" && result.length > 0) {
+          return result;
+        }
+      } catch {
+        // fall through to local resolver
+      }
+    }
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return path.resolve(input);
+    }
+    if (path.isAbsolute(trimmed) || trimmed.startsWith("~")) {
+      return path.resolve(input);
+    }
+    return rootDir ? path.resolve(rootDir, trimmed) : path.resolve(input);
+  };
+}
+
 function normalizeIdentifierList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -505,6 +538,7 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
   const baseConfig = (api.pluginConfig ?? {}) as Record<string, unknown>;
   const override = readUserConfigOverride(api.rootDir);
   const raw: Record<string, unknown> = { ...baseConfig, ...override };
+  const resolvePath = makeResolvePath(api);
   const allDefensesEnabled = raw.allDefensesEnabled !== false;
   const defaultBlockingMode = isDefenseMode(raw.defaultBlockingMode)
     ? raw.defaultBlockingMode
@@ -582,11 +616,11 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     toolCallEnforcementEnabled: readEnabledFlag(raw, "toolCallEnforcementEnabled", allDefensesEnabled),
     dispatchGuardEnabled: dispatchGuardMode !== "off",
     dispatchGuardMode,
-    protectedPaths: normalizeStringList(raw.protectedPaths, api.resolvePath),
+    protectedPaths: normalizeStringList(raw.protectedPaths, resolvePath),
     protectedSkills: normalizeIdentifierList(raw.protectedSkills),
     protectedPlugins: normalizeIdentifierList(raw.protectedPlugins),
-    skillRoots: normalizeStringList(raw.skillRoots, api.resolvePath),
-    extraProtectedRoots: normalizeStringList(raw.extraProtectedRoots, api.resolvePath),
+    skillRoots: normalizeStringList(raw.skillRoots, resolvePath),
+    extraProtectedRoots: normalizeStringList(raw.extraProtectedRoots, resolvePath),
     startupSkillScan: raw.startupSkillScan !== false,
     disabledUserRiskFlags: normalizeIdentifierList(raw.disabledUserRiskFlags),
     observeOnlyUserRiskFlags: normalizeIdentifierList(raw.observeOnlyUserRiskFlags),

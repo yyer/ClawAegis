@@ -315,5 +315,24 @@
         "default": true
       }
     }
+  },
+    "requireHttpsEnabled": {
+    "type": "boolean",
+    "default": true
+  },
+  "requireHttpsMode": {
+    "type": "string",
+    "enum": ["off", "observe", "enforce"],
+    "default": "enforce"
+  },
+  "outboundTrustEnabled": {
+    "type": "boolean",
+    "default": true
+  },
+  "outboundTrustMode": {
+    "type": "string",
+    "enum": ["off", "observe", "enforce"],
+    "default": "enforce"
   }
 }
+
