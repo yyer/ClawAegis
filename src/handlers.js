@@ -1236,6 +1236,7 @@ export function createClawAegisRuntime(api, options) {
                         noteRunSecuritySignals: (nextRunId, payload) => state.noteRunSecuritySignals(nextRunId, payload),
                         noteRuntimeRisk: (nextSessionKey, flags) => state.noteRuntimeRisk(nextSessionKey, flags),
                         noteRunToolCall: (nextRunId, record) => state.noteRunToolCall(nextRunId, record),
+                        peekSessionScriptArtifacts: (nextSessionKey) => state.peekSessionScriptArtifacts(nextSessionKey),
                     },
                     collabConfig: config.collabGuardEnabled && config.collabTeamId
                         ? {
@@ -1491,6 +1492,9 @@ export function createClawAegisRuntime(api, options) {
                     return;
                 }
                 state.clearSessionRuntimeState(sessionKey);
+                // session 真正结束时才清 script artifacts（agent_end 每 turn 触发，
+                // 不能清，否则跨 turn 的 write→exec 攻击无法拦截）。
+                state.clearSessionScriptArtifacts(sessionKey);
                 logger.info("clawaegisex: 已清理 session 级临时安全状态", {
                     event: "session_runtime_state_cleared",
                     hook: "session_end",

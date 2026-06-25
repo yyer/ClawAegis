@@ -599,13 +599,20 @@ export const TOOL_CALL_DEFENSE_STRATEGIES = [
         blockedMessage: "clawaegisex: 已阻止高风险脚本产物的后续执行",
         appliesTo: (ctx) => isModeEnabled(ctx.modes.scriptProvenanceGuard),
         evaluate: (ctx) => {
-            const reason = ctx.helpers.resolveScriptProvenanceViolation(ctx.toolName, ctx.params, ctx.runSecurityState?.scriptArtifacts ?? [], ctx.baseDir);
+            // 优先用当前 runId 的 scriptArtifacts;空则回退到 sessionKey 维度的累积
+            // 视图,拦截 "write 在 run A → exec 在 run B" 的跨 run 绕过。
+            const runArtifacts = ctx.runSecurityState?.scriptArtifacts ?? [];
+            const sessionArtifacts = runArtifacts.length === 0 && ctx.sessionKey
+                ? ctx.state.peekSessionScriptArtifacts(ctx.sessionKey)
+                : runArtifacts;
+            const reason = ctx.helpers.resolveScriptProvenanceViolation(ctx.toolName, ctx.params, sessionArtifacts, ctx.baseDir);
             if (!reason) {
                 return {
                     result: "clear",
                     mode: ctx.modes.scriptProvenanceGuard,
                     extra: {
-                        trackedArtifacts: ctx.runSecurityState?.scriptArtifacts.length ?? 0,
+                        trackedArtifacts: sessionArtifacts.length,
+                        artifactSource: runArtifacts.length > 0 ? "run" : sessionArtifacts.length > 0 ? "session" : "none",
                     },
                 };
             }

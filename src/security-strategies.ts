@@ -180,6 +180,9 @@ export type ToolCallDefenseStateAccess = {
       blockReason?: string;
     },
   ) => void;
+  // 跨 runId 累积的 script artifacts(write 在 run A,exec 在 run B 时回退到这里)。
+  // 返回 sessionKey 维度的全部 artifacts 拷贝;sessionKey 为空或无记录返回 []。
+  peekSessionScriptArtifacts: (sessionKey: string) => RunSecuritySignalState["scriptArtifacts"];
 };
 
 export type ToolCallDefenseContext = {
@@ -928,10 +931,17 @@ export const TOOL_CALL_DEFENSE_STRATEGIES = [
     blockedMessage: "clawaegisex: 已阻止高风险脚本产物的后续执行",
     appliesTo: (ctx) => isModeEnabled(ctx.modes.scriptProvenanceGuard),
     evaluate: (ctx) => {
+      // 优先用当前 runId 的 scriptArtifacts;空则回退到 sessionKey 维度的累积
+      // 视图,拦截 "write 在 run A → exec 在 run B" 的跨 run 绕过。
+      const runArtifacts = ctx.runSecurityState?.scriptArtifacts ?? [];
+      const sessionArtifacts =
+        runArtifacts.length === 0 && ctx.sessionKey
+          ? ctx.state.peekSessionScriptArtifacts(ctx.sessionKey)
+          : runArtifacts;
       const reason = ctx.helpers.resolveScriptProvenanceViolation(
         ctx.toolName,
         ctx.params,
-        ctx.runSecurityState?.scriptArtifacts ?? [],
+        sessionArtifacts,
         ctx.baseDir,
       );
       if (!reason) {
@@ -939,7 +949,9 @@ export const TOOL_CALL_DEFENSE_STRATEGIES = [
           result: "clear",
           mode: ctx.modes.scriptProvenanceGuard,
           extra: {
-            trackedArtifacts: ctx.runSecurityState?.scriptArtifacts.length ?? 0,
+            trackedArtifacts: sessionArtifacts.length,
+            artifactSource:
+              runArtifacts.length > 0 ? "run" : sessionArtifacts.length > 0 ? "session" : "none",
           },
         };
       }

@@ -96,6 +96,11 @@ export class ClawAegisState {
     lastUserInputs = new Map();
     runToolCalls = new Map();
     runSecuritySignals = new Map();
+    // sessionScriptArtifacts 累积同一 sessionKey 下所有 runId 的 script artifacts。
+    // runSecuritySignals 按 runId 索引,write 工具在 run A 记录的 artifact 在 run B
+    // 的 before_tool_call 里看不到 — 跨 run 复用 scriptArtifacts 才能拦住
+    // "write /tmp/x.sh (run A) → bash /tmp/x.sh (run B)" 这类绕过。
+    sessionScriptArtifacts = new Map();
     trustedSkills = new Map();
     skillAssessments = new Map();
     protectedRoots = [];
@@ -151,6 +156,15 @@ export class ClawAegisState {
         for (const [runId, entry] of this.runSecuritySignals) {
             if (now - entry.updatedAt > TURN_STATE_TTL_MS) {
                 this.runSecuritySignals.delete(runId);
+            }
+        }
+        for (const [sessionKey, artifacts] of this.sessionScriptArtifacts) {
+            const fresh = artifacts.filter((artifact) => now - artifact.updatedAt <= TURN_STATE_TTL_MS);
+            if (fresh.length === 0) {
+                this.sessionScriptArtifacts.delete(sessionKey);
+            }
+            else if (fresh.length !== artifacts.length) {
+                this.sessionScriptArtifacts.set(sessionKey, fresh);
             }
         }
     }
@@ -452,7 +466,40 @@ export class ClawAegisState {
         }
         state.scriptArtifacts = [...existing.values()].sort((left, right) => left.path.localeCompare(right.path));
         state.updatedAt = now;
+        // 同步累积到 sessionKey 视图,让后续不同 runId 的 before_tool_call 也能
+        // 拿到本轮之前 write/edit 产生的 script artifacts。
+        if (params.sessionKey) {
+            this.mergeSessionScriptArtifacts(params.sessionKey, params.artifacts, now);
+        }
         return this.peekRunSecurityState(runId) ?? state;
+    }
+    mergeSessionScriptArtifacts(sessionKey, artifacts, now) {
+        if (artifacts.length === 0)
+            return;
+        const current = this.sessionScriptArtifacts.get(sessionKey) ?? [];
+        const merged = new Map();
+        for (const artifact of current) {
+            merged.set(artifact.path, artifact);
+        }
+        for (const artifact of artifacts) {
+            merged.set(artifact.path, {
+                ...artifact,
+                riskFlags: uniqueStrings(artifact.riskFlags),
+                updatedAt: now,
+            });
+        }
+        this.sessionScriptArtifacts.set(sessionKey, [...merged.values()].sort((left, right) => left.path.localeCompare(right.path)));
+    }
+    // peekSessionScriptArtifacts 返回该 sessionKey 下累积的所有 script artifacts
+    // (跨 runId)。before_tool_call 在当前 runId 的 scriptArtifacts 为空时回退到这里,
+    // 用于拦截 "write 在 run A,exec 在 run B" 的跨 run 绕过。
+    peekSessionScriptArtifacts(sessionKey) {
+        const now = this.now();
+        this.cleanupExpiredState(now);
+        const entry = this.sessionScriptArtifacts.get(sessionKey);
+        if (!entry)
+            return [];
+        return entry.map((artifact) => ({ ...artifact, riskFlags: [...artifact.riskFlags] }));
     }
     peekRunToolCalls(runId) {
         const now = this.now();
@@ -517,6 +564,16 @@ export class ClawAegisState {
                 this.runSecuritySignals.delete(runId);
             }
         }
+        // 注意：sessionScriptArtifacts 不在这里清。agent_end 每 turn 触发 clearSessionRuntimeState，
+        // 但 script artifacts 必须跨 turn 保留（write 在 turn A → exec 在 turn B 的跨 runId 攻击
+        // 场景依赖它）。sessionScriptArtifacts 由 cleanupExpiredState TTL（5min）兜底清理，
+        // session_end 调 clearSessionScriptArtifacts 显式清。
+    }
+    // clearSessionScriptArtifacts 只在 session_end 调用，清理跨 turn 累积的
+    // script artifacts。agent_end 不清，保证 write(turn A) → exec(turn B) 的
+    // 跨 runId 攻击能被 script_provenance_guard 拦截。
+    clearSessionScriptArtifacts(sessionKey) {
+        this.sessionScriptArtifacts.delete(sessionKey);
     }
     markToolResultSeen(sessionKey) {
         return this.noteToolResult(sessionKey, {
