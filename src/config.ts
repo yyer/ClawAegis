@@ -56,6 +56,15 @@ export const BLOCK_REASON_COLLAB_APPROVAL =
 
 export type DefenseMode = (typeof DEFENSE_MODES)[number];
 
+// OutboundTrustedEndpoint — 单条出站白名单条目。fingerprint 为空 = 仅域名白名单。
+// backend secplane_outbound_trusted 表的 domain_pattern / fingerprint_sha256 /
+// label 三字段经 compile.go → user_config.outboundTrustedEndpoints[] 灌入。
+export type OutboundTrustedEndpoint = {
+  domain: string;
+  fingerprint?: string;
+  label?: string;
+};
+
 export type ClawAegisPluginConfig = {
   allDefensesEnabled: boolean;
   defaultBlockingMode: DefenseMode;
@@ -81,6 +90,22 @@ export type ClawAegisPluginConfig = {
   toolCallEnforcementEnabled: boolean;
   dispatchGuardEnabled: boolean;
   dispatchGuardMode: DefenseMode;
+  // requireHttps: block http:// ws:// ftp:// URLs in tool params. Default
+  // enabled+enforce via allDefensesEnabled. Driven by secplane rule
+  // defense.requireHttps.
+  requireHttpsEnabled: boolean;
+  requireHttpsMode: DefenseMode;
+  // outboundTrust: domain allowlist for https/wss URLs in tool params. Empty
+  // list = no enforcement (only logs). Driven by secplane rule
+  // defense.outboundTrust + secplane_outbound_trusted table injected at
+  // dispatch time. fingerprint pin (Phase 2) not yet implemented.
+  outboundTrustEnabled: boolean;
+  outboundTrustMode: DefenseMode;
+  outboundTrustedEndpoints: OutboundTrustedEndpoint[];
+  // killSwitch: emergency breaker. When enabled, before_tool_call blocks
+  // every tool call immediately. Driven by secplane rule defense.killSwitch.
+  killSwitchEnabled: boolean;
+  killSwitchReason: string;
   protectedPaths: string[];
   protectedSkills: string[];
   protectedPlugins: string[];
@@ -165,6 +190,23 @@ export const clawAegisPluginConfigSchema = {
     toolCallEnforcementEnabled: defaultEnabledBooleanSchema,
     dispatchGuardEnabled: defaultEnabledBooleanSchema,
     dispatchGuardMode: defaultDefenseModeSchema,
+    requireHttpsEnabled: defaultEnabledBooleanSchema,
+    requireHttpsMode: defaultDefenseModeSchema,
+    outboundTrustEnabled: defaultEnabledBooleanSchema,
+    outboundTrustMode: defaultDefenseModeSchema,
+    killSwitchEnabled: { type: "boolean", default: false },
+    killSwitchReason: { type: "string", default: "" },
+    outboundTrustedEndpoints: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          domain: { type: "string" },
+          fingerprint: { type: "string" },
+          label: { type: "string" },
+        },
+      },
+    },
     protectedPaths: {
       type: "array",
       items: { type: "string" },
@@ -497,6 +539,8 @@ function readDefenseMode(
       | "exfiltrationGuardEnabled"
       | "dispatchGuardEnabled"
       | "collabGuardEnabled"
+      | "requireHttpsEnabled"
+      | "outboundTrustEnabled"
     >;
     modeKey: keyof Pick<
       ClawAegisPluginConfig,
@@ -509,6 +553,8 @@ function readDefenseMode(
       | "exfiltrationGuardMode"
       | "dispatchGuardMode"
       | "collabGuardMode"
+      | "requireHttpsMode"
+      | "outboundTrustMode"
     >;
     defaultMode: DefenseMode;
     allDefensesEnabled: boolean;
@@ -650,6 +696,38 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     defaultMode: defaultBlockingMode,
     allDefensesEnabled,
   });
+  const requireHttpsMode = readDefenseMode(raw, {
+    enabledKey: "requireHttpsEnabled",
+    modeKey: "requireHttpsMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled,
+  });
+  const outboundTrustMode = readDefenseMode(raw, {
+    enabledKey: "outboundTrustEnabled",
+    modeKey: "outboundTrustMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled,
+  });
+  const outboundTrustedEndpoints: OutboundTrustedEndpoint[] = Array.isArray(
+    raw.outboundTrustedEndpoints,
+  )
+    ? raw.outboundTrustedEndpoints
+        .filter(
+          (e): e is Record<string, unknown> =>
+            !!e && typeof e === "object" && typeof (e as Record<string, unknown>).domain === "string" && !!(e as Record<string, unknown>).domain,
+        )
+        .map((e) => ({
+          domain: String((e as Record<string, unknown>).domain).toLowerCase(),
+          fingerprint:
+            typeof (e as Record<string, unknown>).fingerprint === "string"
+              ? ((e as Record<string, unknown>).fingerprint as string).toLowerCase()
+              : "",
+          label:
+            typeof (e as Record<string, unknown>).label === "string"
+              ? ((e as Record<string, unknown>).label as string)
+              : "",
+        }))
+    : [];
   const collabGuardMode = readDefenseMode(raw, {
     enabledKey: "collabGuardEnabled",
     modeKey: "collabGuardMode",
@@ -681,6 +759,13 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     toolCallEnforcementEnabled: readEnabledFlag(raw, "toolCallEnforcementEnabled", allDefensesEnabled),
     dispatchGuardEnabled: dispatchGuardMode !== "off",
     dispatchGuardMode,
+    requireHttpsEnabled: requireHttpsMode !== "off",
+    requireHttpsMode,
+    outboundTrustEnabled: outboundTrustMode !== "off",
+    outboundTrustMode,
+    outboundTrustedEndpoints,
+    killSwitchEnabled: raw.killSwitchEnabled === true,
+    killSwitchReason: typeof raw.killSwitchReason === "string" ? raw.killSwitchReason : "",
     protectedPaths: normalizeStringList(raw.protectedPaths, resolvePath),
     protectedSkills: normalizeIdentifierList(raw.protectedSkills),
     protectedPlugins: normalizeIdentifierList(raw.protectedPlugins),
