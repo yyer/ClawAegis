@@ -32,6 +32,10 @@ export const BLOCK_REASON_MEMORY_WRITE = "安全限制：已拒绝本次高风�
 export const BLOCK_REASON_LOOP = "安全限制：检测到重复高风险工具调用，已停止本次操作。";
 export const BLOCK_REASON_EXFILTRATION_CHAIN = "安全限制：检测到疑似 SSRF 或数据外泄工具调用链，已阻止本次出站请求。";
 export const BLOCK_REASON_DISPATCH_GUARD = "安全限制：检测到针对受保护资源的危险操作请求，已拦截。所有破坏性操作必须通过标准 tool call 执行。";
+export const BLOCK_REASON_COLLAB_IDENTITY = "安全限制：协同链路身份校验失败，sender_id 与 stream key 中的 member 不匹配。";
+export const BLOCK_REASON_COLLAB_SCHEMA = "安全限制：协同消息缺少必需字段（from/to/ts/type）。";
+export const BLOCK_REASON_COLLAB_QUOTA = "安全限制：协同链路 XADD 速率超过配额阈值，已限流。";
+export const BLOCK_REASON_COLLAB_APPROVAL = "安全限制：高风险协同操作（广播/跨成员转派）需要审批，已拦截。";
 const defaultEnabledBooleanSchema = {
     type: "boolean",
     default: true,
@@ -109,6 +113,19 @@ export const clawAegisPluginConfigSchema = {
             type: "array",
             items: { type: "string" },
         },
+        collabGuardEnabled: defaultEnabledBooleanSchema,
+        collabGuardMode: defaultDefenseModeSchema,
+        collabTeamId: { type: "string" },
+        collabIdentityMode: defaultDefenseModeSchema,
+        collabSchemaMode: defaultDefenseModeSchema,
+        collabQuotaMode: defaultDefenseModeSchema,
+        collabApprovalMode: defaultDefenseModeSchema,
+        collabXaddRps: { type: "number", default: 5 },
+        collabStreamMaxLen: { type: "number", default: 1000 },
+        collabMuteOnAnomaly: { type: "boolean", default: true },
+        collabAuditReplay: { type: "boolean", default: true },
+        collabApprovalThreshold: { type: "number", default: 85 },
+        collabRedisAclPreview: { type: "string" },
     },
 };
 export const clawAegisPluginUiHints = {
@@ -329,6 +346,13 @@ function readEnabledFlag(raw, key, allDefensesEnabled) {
 function isDefenseMode(value) {
     return typeof value === "string" && DEFENSE_MODES.includes(value);
 }
+// readCollabSubMode reads a standalone DefenseMode field (no paired enabled
+// boolean) for the 4 collab sub-rules. Empty/invalid falls back to the
+// provided default (typically "observe" for safe rollout).
+function readCollabSubMode(raw, key, fallback) {
+    const v = raw[key];
+    return isDefenseMode(v) ? v : fallback;
+}
 function readDefenseMode(raw, params) {
     if (!params.allDefensesEnabled || raw[params.enabledKey] === false) {
         return "off";
@@ -468,6 +492,12 @@ export function resolveClawAegisPluginConfig(api) {
         defaultMode: defaultBlockingMode,
         allDefensesEnabled,
     });
+    const collabGuardMode = readDefenseMode(raw, {
+        enabledKey: "collabGuardEnabled",
+        modeKey: "collabGuardMode",
+        defaultMode: defaultBlockingMode,
+        allDefensesEnabled,
+    });
     return {
         allDefensesEnabled,
         defaultBlockingMode,
@@ -503,6 +533,21 @@ export function resolveClawAegisPluginConfig(api) {
         observeOnlyUserRiskFlags: normalizeIdentifierList(raw.observeOnlyUserRiskFlags),
         disabledToolResultFlags: normalizeIdentifierList(raw.disabledToolResultFlags),
         observeOnlyToolResultFlags: normalizeIdentifierList(raw.observeOnlyToolResultFlags),
+        collabGuardEnabled: collabGuardMode !== "off",
+        collabGuardMode,
+        collabTeamId: typeof raw.collabTeamId === "string" ? raw.collabTeamId : "",
+        collabIdentityMode: readCollabSubMode(raw, "collabIdentityMode", "observe"),
+        collabSchemaMode: readCollabSubMode(raw, "collabSchemaMode", "observe"),
+        collabQuotaMode: readCollabSubMode(raw, "collabQuotaMode", "observe"),
+        collabApprovalMode: readCollabSubMode(raw, "collabApprovalMode", "observe"),
+        collabXaddRps: typeof raw.collabXaddRps === "number" && raw.collabXaddRps > 0 ? raw.collabXaddRps : 5,
+        collabStreamMaxLen: typeof raw.collabStreamMaxLen === "number" && raw.collabStreamMaxLen > 0 ? raw.collabStreamMaxLen : 1000,
+        collabMuteOnAnomaly: raw.collabMuteOnAnomaly !== false,
+        collabAuditReplay: raw.collabAuditReplay !== false,
+        collabApprovalThreshold: typeof raw.collabApprovalThreshold === "number" && raw.collabApprovalThreshold > 0
+            ? raw.collabApprovalThreshold
+            : 85,
+        collabRedisAclPreview: typeof raw.collabRedisAclPreview === "string" ? raw.collabRedisAclPreview : "",
     };
 }
 export function resolveClawAegisStateDir(api) {

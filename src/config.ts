@@ -45,6 +45,15 @@ export const BLOCK_REASON_EXFILTRATION_CHAIN =
 export const BLOCK_REASON_DISPATCH_GUARD =
   "安全限制：检测到针对受保护资源的危险操作请求，已拦截。所有破坏性操作必须通过标准 tool call 执行。";
 
+export const BLOCK_REASON_COLLAB_IDENTITY =
+  "安全限制：协同链路身份校验失败，sender_id 与 stream key 中的 member 不匹配。";
+export const BLOCK_REASON_COLLAB_SCHEMA =
+  "安全限制：协同消息缺少必需字段（from/to/ts/type）。";
+export const BLOCK_REASON_COLLAB_QUOTA =
+  "安全限制：协同链路 XADD 速率超过配额阈值，已限流。";
+export const BLOCK_REASON_COLLAB_APPROVAL =
+  "安全限制：高风险协同操作（广播/跨成员转派）需要审批，已拦截。";
+
 export type DefenseMode = (typeof DEFENSE_MODES)[number];
 
 export type ClawAegisPluginConfig = {
@@ -98,6 +107,23 @@ export type ClawAegisPluginConfig = {
   // encoded-* derivatives, so the dynamic runtime-risk prompt guard does
   // not nudge the LLM. Driven by secplane rule mode=observe.
   observeOnlyToolResultFlags: string[];
+  // Collaboration governance (collab_guard). Master switch + 4 sub-modes.
+  // Master CollabGuardMode gates the whole defense; sub-modes control each
+  // rule (identity / schema / quota / approval) independently. Driven by
+  // the KindCollabPolicy rule dispatched from secplane.
+  collabGuardEnabled: boolean;
+  collabGuardMode: DefenseMode;
+  collabTeamId: string;
+  collabIdentityMode: DefenseMode;
+  collabSchemaMode: DefenseMode;
+  collabQuotaMode: DefenseMode;
+  collabApprovalMode: DefenseMode;
+  collabXaddRps: number;
+  collabStreamMaxLen: number;
+  collabMuteOnAnomaly: boolean;
+  collabAuditReplay: boolean;
+  collabApprovalThreshold: number;
+  collabRedisAclPreview: string;
 };
 
 const defaultEnabledBooleanSchema = {
@@ -179,6 +205,19 @@ export const clawAegisPluginConfigSchema = {
       type: "array",
       items: { type: "string" },
     },
+    collabGuardEnabled: defaultEnabledBooleanSchema,
+    collabGuardMode: defaultDefenseModeSchema,
+    collabTeamId: { type: "string" },
+    collabIdentityMode: defaultDefenseModeSchema,
+    collabSchemaMode: defaultDefenseModeSchema,
+    collabQuotaMode: defaultDefenseModeSchema,
+    collabApprovalMode: defaultDefenseModeSchema,
+    collabXaddRps: { type: "number", default: 5 },
+    collabStreamMaxLen: { type: "number", default: 1000 },
+    collabMuteOnAnomaly: { type: "boolean", default: true },
+    collabAuditReplay: { type: "boolean", default: true },
+    collabApprovalThreshold: { type: "number", default: 85 },
+    collabRedisAclPreview: { type: "string" },
   },
 } satisfies OpenClawPluginConfigSchema["jsonSchema"];
 
@@ -426,6 +465,24 @@ function isDefenseMode(value: unknown): value is DefenseMode {
   return typeof value === "string" && (DEFENSE_MODES as readonly string[]).includes(value);
 }
 
+// readCollabSubMode reads a standalone DefenseMode field (no paired enabled
+// boolean) for the 4 collab sub-rules. Empty/invalid falls back to the
+// provided default (typically "observe" for safe rollout).
+function readCollabSubMode(
+  raw: Record<string, unknown>,
+  key: keyof Pick<
+    ClawAegisPluginConfig,
+    | "collabIdentityMode"
+    | "collabSchemaMode"
+    | "collabQuotaMode"
+    | "collabApprovalMode"
+  >,
+  fallback: DefenseMode,
+): DefenseMode {
+  const v = raw[key];
+  return isDefenseMode(v) ? v : fallback;
+}
+
 function readDefenseMode(
   raw: Record<string, unknown>,
   params: {
@@ -439,6 +496,7 @@ function readDefenseMode(
       | "loopGuardEnabled"
       | "exfiltrationGuardEnabled"
       | "dispatchGuardEnabled"
+      | "collabGuardEnabled"
     >;
     modeKey: keyof Pick<
       ClawAegisPluginConfig,
@@ -450,6 +508,7 @@ function readDefenseMode(
       | "loopGuardMode"
       | "exfiltrationGuardMode"
       | "dispatchGuardMode"
+      | "collabGuardMode"
     >;
     defaultMode: DefenseMode;
     allDefensesEnabled: boolean;
@@ -591,6 +650,12 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     defaultMode: defaultBlockingMode,
     allDefensesEnabled,
   });
+  const collabGuardMode = readDefenseMode(raw, {
+    enabledKey: "collabGuardEnabled",
+    modeKey: "collabGuardMode",
+    defaultMode: defaultBlockingMode,
+    allDefensesEnabled,
+  });
   return {
     allDefensesEnabled,
     defaultBlockingMode,
@@ -626,6 +691,23 @@ export function resolveClawAegisPluginConfig(api: OpenClawPluginApi): ClawAegisP
     observeOnlyUserRiskFlags: normalizeIdentifierList(raw.observeOnlyUserRiskFlags),
     disabledToolResultFlags: normalizeIdentifierList(raw.disabledToolResultFlags),
     observeOnlyToolResultFlags: normalizeIdentifierList(raw.observeOnlyToolResultFlags),
+    collabGuardEnabled: collabGuardMode !== "off",
+    collabGuardMode,
+    collabTeamId: typeof raw.collabTeamId === "string" ? raw.collabTeamId : "",
+    collabIdentityMode: readCollabSubMode(raw, "collabIdentityMode", "observe"),
+    collabSchemaMode: readCollabSubMode(raw, "collabSchemaMode", "observe"),
+    collabQuotaMode: readCollabSubMode(raw, "collabQuotaMode", "observe"),
+    collabApprovalMode: readCollabSubMode(raw, "collabApprovalMode", "observe"),
+    collabXaddRps: typeof raw.collabXaddRps === "number" && raw.collabXaddRps > 0 ? raw.collabXaddRps : 5,
+    collabStreamMaxLen:
+      typeof raw.collabStreamMaxLen === "number" && raw.collabStreamMaxLen > 0 ? raw.collabStreamMaxLen : 1000,
+    collabMuteOnAnomaly: raw.collabMuteOnAnomaly !== false,
+    collabAuditReplay: raw.collabAuditReplay !== false,
+    collabApprovalThreshold:
+      typeof raw.collabApprovalThreshold === "number" && raw.collabApprovalThreshold > 0
+        ? raw.collabApprovalThreshold
+        : 85,
+    collabRedisAclPreview: typeof raw.collabRedisAclPreview === "string" ? raw.collabRedisAclPreview : "",
   };
 }
 

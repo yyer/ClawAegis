@@ -352,7 +352,7 @@ function postEventToSecplane(record) {
         }).slice(0, 2048),
     };
     const url = baseURL.replace(/\/$/, "") + SECPLANE_INGEST_PATH;
-    const body = JSON.stringify({ source: "aegis", events: [event] });
+    const body = JSON.stringify({ source: record.source ?? "aegis", events: [event] });
     // Use globalThis.fetch (Node 22 in the OpenClaw image has native fetch).
     // 30s timeout: ClawManager's secplane ingest endpoint can take 5–6s per
     // single event under load (auth lookup + rule re-eval + alert persist).
@@ -1145,6 +1145,7 @@ export function createClawAegisRuntime(api, options) {
                     memoryGuard: memoryGuardMode,
                     loopGuard: loopGuardMode,
                     exfiltrationGuard: exfiltrationGuardMode,
+                    collabGuard: config.collabGuardMode,
                 };
                 const toolGuardStartedAt = now();
                 logDefenseStart(logger, {
@@ -1236,6 +1237,18 @@ export function createClawAegisRuntime(api, options) {
                         noteRuntimeRisk: (nextSessionKey, flags) => state.noteRuntimeRisk(nextSessionKey, flags),
                         noteRunToolCall: (nextRunId, record) => state.noteRunToolCall(nextRunId, record),
                     },
+                    collabConfig: config.collabGuardEnabled && config.collabTeamId
+                        ? {
+                            teamId: config.collabTeamId,
+                            identityMode: config.collabIdentityMode,
+                            schemaMode: config.collabSchemaMode,
+                            quotaMode: config.collabQuotaMode,
+                            approvalMode: config.collabApprovalMode,
+                            xaddRps: config.collabXaddRps,
+                            streamMaxLen: config.collabStreamMaxLen,
+                            approvalThreshold: config.collabApprovalThreshold,
+                        }
+                        : undefined,
                 };
                 for (const strategy of toolCallDefenseStrategies) {
                     if (!strategy.appliesTo(toolCallContext)) {
@@ -1272,6 +1285,7 @@ export function createClawAegisRuntime(api, options) {
                             commandText,
                             toolParams: normalizedParams,
                             userInput: sessionKey ? state.peekLastUserInput(sessionKey) : undefined,
+                            source: strategy.id === "collab_guard" ? "collab_governance" : undefined,
                         });
                         logger.warn(strategy.blockedMessage ?? "clawaegisex: 已阻止风险工具调用", {
                             event: "tool_call_blocked",
@@ -1310,6 +1324,7 @@ export function createClawAegisRuntime(api, options) {
                             commandText,
                             toolParams: normalizedParams,
                             userInput: sessionKey ? state.peekLastUserInput(sessionKey) : undefined,
+                            source: strategy.id === "collab_guard" ? "collab_governance" : undefined,
                         });
                         logObservedToolCall({
                             logger,

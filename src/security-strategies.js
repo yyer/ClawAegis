@@ -1,4 +1,4 @@
-import { BLOCK_REASON_EXFILTRATION_CHAIN, BLOCK_REASON_HIGH_RISK_OPERATION, BLOCK_REASON_LOOP, BLOCK_REASON_PROTECTED_PATH, BLOCK_REASON_WORKSPACE_DELETE, LOOP_GUARD_ALLOW_COUNT, } from "./config.js";
+import { BLOCK_REASON_COLLAB_APPROVAL, BLOCK_REASON_COLLAB_IDENTITY, BLOCK_REASON_COLLAB_QUOTA, BLOCK_REASON_COLLAB_SCHEMA, BLOCK_REASON_EXFILTRATION_CHAIN, BLOCK_REASON_HIGH_RISK_OPERATION, BLOCK_REASON_LOOP, BLOCK_REASON_PROTECTED_PATH, BLOCK_REASON_WORKSPACE_DELETE, LOOP_GUARD_ALLOW_COUNT, } from "./config.js";
 function isModeEnabled(mode) {
     return mode !== "off";
 }
@@ -708,4 +708,172 @@ export const TOOL_CALL_DEFENSE_STRATEGIES = [
             };
         },
     },
+    {
+        id: "collab_guard",
+        modeSource: "collabGuard",
+        order: 11,
+        clearResult: "clear",
+        observedMessage: "clawaegisex: 观察到协同链路违规，已放行",
+        blockedMessage: "clawaegisex: 已拦截协同链路违规",
+        appliesTo: (ctx) => isModeEnabled(ctx.modes.collabGuard) &&
+            !!ctx.collabConfig &&
+            ctx.collabConfig.teamId !== "" &&
+            /XADD|XREAD|XREVRANGE/i.test(ctx.commandText ?? ""),
+        evaluate: (ctx) => detectCollabGuardViolation(ctx),
+    },
 ];
+// COLLAB_RULE_IDS — the 4 sub-rule identifiers emitted as rule_id in event
+// details when collab_guard fires. Frontend / secplane_alert filtering uses
+// these to distinguish identity / schema / quota / approval violations.
+export const COLLAB_RULE_IDS = [
+    "collab_identity_breach",
+    "collab_schema_violation",
+    "collab_quota_throttle",
+    "collab_approval_required",
+];
+// collabQuotaWindows — per-(teamId:member) XADD timestamp log for the sliding
+// 1-second window used by detectCollabGuardViolation. Module-scoped so it
+// persists across tool calls within a single ClawAegis process; evicted
+// lazily when entries age out. Restart resets counters (acceptable for
+// scope B; persistent rate limiting deferred to scope C with Redis backend).
+const collabQuotaWindows = new Map();
+const COLLAB_STREAM_KEY_RE = /claw:team:(\d+):inbox:(\w+)/i;
+const COLLAB_XADD_FIELD_RE = /\b([A-Za-z_][A-Za-z0-9_]*)\s+/g;
+// detectCollabGuardViolation inspects a bash/exec tool call whose commandText
+// contains XADD/XREAD/XREVRANGE against claw:team:<id>:inbox:<member>. Returns
+// a ToolCallDefenseEvaluation with result clear/blocked/observed and extra
+// metadata (rule_id, team_id, member, stream_key) for event emission.
+//
+// The 4 sub-rules each have their own DefenseMode from collabConfig:
+//   identity  — sender_id in XADD field-values must match the stream's member
+//   schema    — XADD must carry from/to/ts/type fields
+//   quota     — XADD rate per (team, member) within 1s window ≤ xaddRps
+//   approval  — type=broadcast or to!=member routes to approval gate
+//
+// The strategy's appliesTo already filters to XADD/XREAD/XREVRANGE commands
+// when collabGuard is enabled and teamId is set. evaluate runs all 4 sub-rules
+// in order; first enforce-mode hit blocks, otherwise observed events are
+// emitted for each hit. If no sub-rule hits, returns clear.
+function detectCollabGuardViolation(ctx) {
+    const cfg = ctx.collabConfig;
+    const commandText = ctx.commandText ?? "";
+    const mode = ctx.modes.collabGuard;
+    const extraBase = {
+        team_id: cfg.teamId,
+        stream_key: "",
+        member: "",
+        command_text: commandText.slice(0, 512),
+    };
+    // Extract stream key and member from the command. If we can't parse a
+    // claw:team:<id>:inbox:<member> key, this isn't a governed stream — return
+    // clear so the guard doesn't fire on unrelated Redis commands.
+    const streamMatch = commandText.match(COLLAB_STREAM_KEY_RE);
+    if (!streamMatch) {
+        return { result: "clear", mode };
+    }
+    const streamTeamId = streamMatch[1];
+    const streamMember = streamMatch[2];
+    extraBase.stream_key = streamMatch[0];
+    extraBase.member = streamMember;
+    // Team mismatch — not our team, don't enforce. Still clear.
+    if (streamTeamId !== String(cfg.teamId)) {
+        return { result: "clear", mode };
+    }
+    // Parse XADD field-value pairs. XADD syntax: XADD key [MAXLEN ~ N] * field1 value1 field2 value2 ...
+    // We only need field names (keys), not values, for schema check.
+    const xaddMatch = commandText.match(/XADD\b\s+\S+(?:\s+(?:MAXLEN\s+[~=]\s*\d+|\*|\$[\w-]+))?\s+(.*)/is);
+    const fields = {};
+    if (xaddMatch && xaddMatch[1]) {
+        const tail = xaddMatch[1].trim();
+        const tokens = tail.split(/\s+/);
+        for (let i = 0; i + 1 < tokens.length; i += 2) {
+            const k = tokens[i];
+            const v = tokens[i + 1];
+            if (k && v && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+                fields[k] = v;
+            }
+        }
+    }
+    const violations = [];
+    // 1. identity — sender_id field must match streamMember
+    if (cfg.identityMode !== "off") {
+        const sender = fields.sender_id ?? fields.from ?? fields.sender ?? "";
+        if (sender && sender !== streamMember) {
+            violations.push({
+                rule_id: "collab_identity_breach",
+                reason: BLOCK_REASON_COLLAB_IDENTITY,
+                mode: cfg.identityMode,
+            });
+        }
+    }
+    // 2. schema — required fields from/to/ts/type
+    if (cfg.schemaMode !== "off") {
+        const missing = [];
+        if (!fields.from)
+            missing.push("from");
+        if (!fields.to)
+            missing.push("to");
+        if (!fields.ts)
+            missing.push("ts");
+        if (!fields.type)
+            missing.push("type");
+        if (missing.length > 0) {
+            violations.push({
+                rule_id: "collab_schema_violation",
+                reason: `${BLOCK_REASON_COLLAB_SCHEMA} 缺失字段: ${missing.join(", ")}`,
+                mode: cfg.schemaMode,
+            });
+        }
+    }
+    // 3. quota — XADD rate per (team, member) within 1s window
+    if (cfg.quotaMode !== "off" && /XADD/i.test(commandText)) {
+        const quotaKey = `${cfg.teamId}:${streamMember}`;
+        const now = ctx.now();
+        const window = collabQuotaWindows.get(quotaKey) ?? [];
+        // Evict entries older than 1s.
+        const pruned = window.filter((ts) => now - ts < 1000);
+        pruned.push(now);
+        collabQuotaWindows.set(quotaKey, pruned);
+        if (pruned.length > cfg.xaddRps) {
+            violations.push({
+                rule_id: "collab_quota_throttle",
+                reason: `${BLOCK_REASON_COLLAB_QUOTA} 1s 内 XADD ${pruned.length} 次，超过阈值 ${cfg.xaddRps}`,
+                mode: cfg.quotaMode,
+            });
+        }
+    }
+    // 4. approval — type=broadcast or to!=member
+    if (cfg.approvalMode !== "off") {
+        const msgType = fields.type ?? "";
+        const toField = fields.to ?? "";
+        if (msgType === "broadcast" || (toField && toField !== streamMember)) {
+            violations.push({
+                rule_id: "collab_approval_required",
+                reason: BLOCK_REASON_COLLAB_APPROVAL,
+                mode: cfg.approvalMode,
+            });
+        }
+    }
+    if (violations.length === 0) {
+        return { result: "clear", mode };
+    }
+    // First enforce-mode violation blocks immediately. If all hits are observe,
+    // return observed with the first reason (event writer emits one event per
+    // strategy; the caller in before_tool_call will set details.rule_id).
+    const firstEnforce = violations.find((v) => v.mode === "enforce");
+    if (firstEnforce) {
+        return {
+            result: "blocked",
+            reason: firstEnforce.reason,
+            mode,
+            extra: { ...extraBase, rule_id: firstEnforce.rule_id, all_violations: violations.map((v) => v.rule_id) },
+        };
+    }
+    const firstObserved = violations[0];
+    return {
+        result: "observed",
+        reason: firstObserved.reason,
+        mode,
+        extra: { ...extraBase, rule_id: firstObserved.rule_id, all_violations: violations.map((v) => v.rule_id) },
+    };
+}
