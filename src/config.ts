@@ -577,22 +577,26 @@ function readDefenseMode(
 //   -> ClawAegis reads it on the next hook event (mtime-watched reload).
 //
 // Priority order (first existing wins):
-//   1. ~/.openclaw/workspace/skills/clawaegisex/user_config.json
+//   1. <rootDir>/user_config.json
+//        — this is where DispatchAegisApply writes the config directly via
+//          k8s exec (extensions/clawaegisex/user_config.json). rootDir is the
+//          plugin's own directory under extensions/, which is the authoritative
+//          location managed by ClawManager dispatch. Putting it first means
+//          DispatchAegisApply's fast-path config write always wins over the
+//          stale copy left in workspace/skills/ by the last install_skill.
+//   2. ~/.openclaw/workspace/skills/clawaegisex/user_config.json
 //        — this is where `install_skill` extracts the dispatched bundle.
-//          Putting it first means ClawManager dispatches are authoritative.
-//   2. <rootDir>/user_config.json
-//        — developer-local override next to the loaded plugin source.
-//          Useful for poking at config during local development without
-//          touching the secplane pipeline.
+//          Kept as a fallback so DispatchAegis (full install_skill path) still
+//          works when extensions/ has not been written yet.
 //   3. ~/.openclaw/skills/clawaegisex/user_config.json
 //        — legacy install location, kept for compatibility.
 export function userConfigCandidatePaths(rootDir: string | undefined): string[] {
   const out: string[] = [];
   const home = os.homedir();
+  if (rootDir) out.push(path.join(rootDir, "user_config.json"));
   if (home) {
     out.push(path.join(home, ".openclaw", "workspace", "skills", "clawaegisex", "user_config.json"));
   }
-  if (rootDir) out.push(path.join(rootDir, "user_config.json"));
   if (home) {
     out.push(path.join(home, ".openclaw", "skills", "clawaegisex", "user_config.json"));
   }
